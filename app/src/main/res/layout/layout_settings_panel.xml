@@ -1,20 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView
     xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="280dp"
+    android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#F0060d17"
-    android:scrollbars="none">
+    android:background="#0f172a"
+    android:elevation="8dp">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:paddingTop="56dp"
-        android:paddingHorizontal="16dp"
-        android:paddingBottom="80dp">
+        android:padding="16dp">
 
-        <!-- Cabecalho -->
+        <!-- Cabeçalho -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -26,322 +24,74 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="CONFIGURACOES"
-                android:textSize="11sp"
+                android:text="CONFIGURAÇÕES"
+                android:textSize="12sp"
+                android:textColor="#f8fafc"
                 android:textStyle="bold"
-                android:textColor="#94a3b8"
-                android:letterSpacing="0.15" />
+                android:letterSpacing="0.15"/>
 
             <ImageButton
                 android:id="@+id/btnClosePanel"
                 android:layout_width="32dp"
                 android:layout_height="32dp"
-                android:background="@android:color/transparent"
+                android:background="@drawable/bg_action_btn"
                 android:src="@android:drawable/ic_menu_close_clear_cancel"
-                android:tint="#64748b"
-                android:contentDescription="Fechar" />
+                android:scaleType="centerInside"
+                android:padding="6dp"
+                android:contentDescription="Fechar"/>
 
         </LinearLayout>
 
-        <!-- ======================================================= -->
-        <!-- SECCAO: RTMP                                             -->
-        <!-- ======================================================= -->
+        <!-- ================================================ -->
+        <!-- RTMP URL                                         -->
+        <!-- ================================================ -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="DESTINO RTMP"
+            android:text="SERVIDOR RTMP"
             android:textSize="9sp"
             android:textColor="#38bdf8"
             android:textStyle="bold"
             android:letterSpacing="0.2"
-            android:layout_marginBottom="8dp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="IP do PC onde o MediaMTX esta rodando"
-            android:textSize="10sp"
-            android:textColor="#64748b"
-            android:layout_marginBottom="6dp" />
+            android:layout_marginBottom="8dp"/>
 
         <EditText
             android:id="@+id/editRtmpUrl"
             android:layout_width="match_parent"
             android:layout_height="44dp"
-            android:hint="rtmp://192.168.1.100:1935/live/stream"
+            android:hint="rtmp://ip:1935/live/stream"
             android:textSize="11sp"
-            android:textColor="#f1f5f9"
+            android:textColor="#f8fafc"
             android:textColorHint="#475569"
-            android:fontFamily="monospace"
             android:background="@drawable/bg_spinner"
             android:paddingHorizontal="10dp"
-            android:inputType="textUri"
-            android:imeOptions="actionDone"
+            android:fontFamily="monospace"
+            android:inputType="text"
             android:singleLine="true"
-            android:layout_marginBottom="8dp" />
+            android:layout_marginBottom="10dp"/>
 
         <Button
             android:id="@+id/btnApplyRtmpUrl"
             android:layout_width="match_parent"
-            android:layout_height="40dp"
-            android:text="Aplicar e Reconectar"
+            android:layout_height="44dp"
+            android:text="APLICAR E RECONECTAR"
             android:textSize="12sp"
             android:textColor="#000000"
-            android:backgroundTint="#38bdf8"
-            android:layout_marginBottom="20dp" />
+            android:backgroundTint="#38bdf8"/>
 
-        <!-- Divisor -->
-        <View android:layout_width="match_parent" android:layout_height="1dp"
-            android:background="#1e293b" android:layout_marginBottom="16dp"/>
-
-        <!-- ======================================================= -->
-        <!-- SECCAO: VIDEO                                            -->
-        <!-- ======================================================= -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="VIDEO"
-            android:textSize="9sp"
-            android:textColor="#38bdf8"
-            android:textStyle="bold"
-            android:letterSpacing="0.2"
-            android:layout_marginBottom="10dp" />
-
-        <!-- Resolucao -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="12dp">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Resolucao"
-                android:textSize="13sp"
-                android:textColor="#cbd5e1" />
-
-            <Spinner
-                android:id="@+id/spinResolution"
-                android:layout_width="120dp"
-                android:layout_height="32dp"
-                android:background="@drawable/bg_spinner"
-                android:popupBackground="#1e293b" />
-
-        </LinearLayout>
-
-        <!-- Frame rate -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="12dp">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Frame Rate"
-                android:textSize="13sp"
-                android:textColor="#cbd5e1" />
-
-            <Spinner
-                android:id="@+id/spinFrameRate"
-                android:layout_width="120dp"
-                android:layout_height="32dp"
-                android:background="@drawable/bg_spinner"
-                android:popupBackground="#1e293b" />
-
-        </LinearLayout>
-
-        <!-- Bitrate -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="20dp">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Bitrate"
-                android:textSize="13sp"
-                android:textColor="#cbd5e1" />
-
-            <Spinner
-                android:id="@+id/spinBitrate"
-                android:layout_width="120dp"
-                android:layout_height="32dp"
-                android:background="@drawable/bg_spinner"
-                android:popupBackground="#1e293b" />
-
-        </LinearLayout>
-
-        <!-- Divisor -->
-        <View android:layout_width="match_parent" android:layout_height="1dp"
-            android:background="#1e293b" android:layout_marginBottom="16dp"/>
-
-        <!-- ======================================================= -->
-        <!-- SECCAO: CAMERA                                           -->
-        <!-- ======================================================= -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="CAMERA"
-            android:textSize="9sp"
-            android:textColor="#38bdf8"
-            android:textStyle="bold"
-            android:letterSpacing="0.2"
-            android:layout_marginBottom="10dp" />
-
-        <!-- OIS -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="12dp">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Estabilizacao OIS"
-                android:textSize="13sp"
-                android:textColor="#cbd5e1" />
-
-            <Switch
-                android:id="@+id/switchOis"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:checked="true"
-                android:thumbTint="#38bdf8"
-                android:trackTint="#1e40af" />
-
-        </LinearLayout>
-
-        <!-- Grade -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="12dp">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Grade 3x3"
-                android:textSize="13sp"
-                android:textColor="#cbd5e1" />
-
-            <Switch
-                android:id="@+id/switchGrid"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:thumbTint="#38bdf8"
-                android:trackTint="#334155" />
-
-        </LinearLayout>
-
-        <!-- HUD -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="12dp">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="HUD info"
-                android:textSize="13sp"
-                android:textColor="#cbd5e1" />
-
-            <Switch
-                android:id="@+id/switchHud"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:checked="true"
-                android:thumbTint="#38bdf8"
-                android:trackTint="#1e40af" />
-
-        </LinearLayout>
-
-        <!-- Divisor -->
-        <View android:layout_width="match_parent" android:layout_height="1dp"
-            android:background="#1e293b" android:layout_marginBottom="16dp"/>
-
-        <!-- ======================================================= -->
-        <!-- SECCAO: AUDIO                                            -->
-        <!-- ======================================================= -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="AUDIO"
-            android:textSize="9sp"
-            android:textColor="#38bdf8"
-            android:textStyle="bold"
-            android:letterSpacing="0.2"
-            android:layout_marginBottom="10dp" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="12dp">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Audio no stream"
-                android:textSize="13sp"
-                android:textColor="#cbd5e1" />
-
-            <Switch
-                android:id="@+id/switchAudio"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:checked="true"
-                android:thumbTint="#38bdf8"
-                android:trackTint="#1e40af" />
-
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Ganho do microfone"
-                android:textSize="13sp"
-                android:textColor="#cbd5e1" />
-
-            <SeekBar
-                android:id="@+id/seekMicGain"
-                android:layout_width="100dp"
-                android:layout_height="wrap_content"
-                android:max="100"
-                android:progress="70"
-                android:progressTint="#38bdf8"
-                android:thumbTint="#38bdf8" />
-
-        </LinearLayout>
+        <!-- ================================================ -->
+        <!-- VIEWS FANTASMAS — mantêm IDs que MainActivity.kt -->
+        <!-- referencia em setupSettingsPanel(). Invisíveis.  -->
+        <!-- ================================================ -->
+        <Spinner  android:id="@+id/spinResolution" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone"/>
+        <Spinner  android:id="@+id/spinFrameRate"  android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone"/>
+        <Spinner  android:id="@+id/spinBitrate"    android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone"/>
+        <Switch   android:id="@+id/switchOis"      android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone"/>
+        <Switch   android:id="@+id/switchGrid"     android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone"/>
+        <Switch   android:id="@+id/switchHud"      android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone"/>
+        <Switch   android:id="@+id/switchAudio"    android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone"/>
+        <SeekBar  android:id="@+id/seekMicGain"    android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone"/>
+        <Button   android:id="@+id/btnResetParams" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone"/>
 
     </LinearLayout>
 </ScrollView>

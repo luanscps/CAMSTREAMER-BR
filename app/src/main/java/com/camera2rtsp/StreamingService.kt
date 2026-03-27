@@ -68,7 +68,7 @@ class StreamingService : Service(), ConnectChecker {
 
         val pm = getSystemService(POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "camera2rtsp:streaming")
-            .apply { acquire(12 * 60 * 60 * 1000L) }
+            .apply { acquire() }
 
         try {
             httpServer = WebControlServer(8080, cameraController, applicationContext)
