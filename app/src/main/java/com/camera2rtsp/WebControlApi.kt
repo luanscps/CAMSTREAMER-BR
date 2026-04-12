@@ -30,13 +30,16 @@ object WebControlApi {
 
     // ─────────────────────────────────────────────
     // GET /api/status  ou  GET /status
+    // Agora recebe o server para ler connectedClients real
     // ─────────────────────────────────────────────
-    fun serveStatus(cameraController: Camera2Controller): Response {
+    fun serveStatus(cameraController: Camera2Controller, server: WebControlServer): Response {
         val c = cameraController
         val streaming = c.rtmpCamera?.isStreaming == true
         val focusMode = if (c.autoFocus) "continuous-video" else "off"
         val focusDist = String.format(java.util.Locale.US, "%.2f", c.focusDistance)
-        val numClients = if (streaming) 1 else 0
+
+        // ✓ Contador real de clientes com painel web aberto
+        val numClients = server.connectedClients
 
         val curvals = mapOf(
             "video_size"           to "${c.currentWidth}x${c.currentHeight}",
