@@ -33,7 +33,8 @@ class StreamingService : Service(), ConnectChecker {
     private var wakeLock: PowerManager.WakeLock? = null
     private var currentFacing = CameraHelper.Facing.BACK
 
-    var rtmpUrl = "rtmp://192.168.1.100:1935/live/stream"
+    // Fix 5: URL default centralizada — MainActivity referencia daqui
+    var rtmpUrl = DEFAULT_RTMP_URL
 
     inner class LocalBinder : Binder() {
         fun getService(): StreamingService = this@StreamingService
@@ -44,6 +45,8 @@ class StreamingService : Service(), ConnectChecker {
     companion object {
         const val ACTION_STOP    = "com.camera2rtsp.STOP"
         const val EXTRA_RTMP_URL = "rtmp_url"
+        // Fix 5: fonte única de verdade para a URL padrão
+        const val DEFAULT_RTMP_URL = "rtmp://192.168.1.100:1935/live/stream"
         var instance: StreamingService? = null
             private set
     }
@@ -100,12 +103,17 @@ class StreamingService : Service(), ConnectChecker {
         updateNotification("Preview ativo")
     }
 
+    // Fix 4: detachView não interrompe o stream — só para preview se não estava streamando
     fun detachView() {
         Log.i(tag, "detachView")
         val wasStreaming = rtmpStreamer.isStreaming
-        rtmpStreamer.stop()
-        rtmpStreamer.initBackground(applicationContext)
-        if (wasStreaming) rtmpStreamer.startStream(applicationContext, rtmpUrl)
+        if (!wasStreaming) {
+            // Sem stream ativo: apenas para preview e volta ao modo background
+            rtmpStreamer.stopPreview()
+            rtmpStreamer.initBackground(applicationContext)
+        }
+        // Se estava streamando: não toca em nada — o encoder continua rodando em background
+        // O stream só será interrompido se o usuário apertar Stop explicitamente
     }
 
     fun switchCamera(cameraId: String, facing: CameraHelper.Facing) {
