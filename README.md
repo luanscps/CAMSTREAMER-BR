@@ -1,325 +1,196 @@
-# 📡 Camera2 RTSP Server + Web Control
+# CAMSTREAMER-BR
 
-> Sistema profissional de streaming RTSP com Camera2 API do Android - Controle remoto via navegador web
-
-## 🎯 Sobre o Projeto
-
-Transforme seu **Samsung Galaxy Note10+** em um servidor RTSP profissional com controle total via web. Stream de vídeo de alta qualidade com ajustes manuais de ISO, exposição, foco e seleção entre as 4 câmeras do dispositivo.
-
-### ✨ Destaques
-
-- **📡 Servidor RTSP** na porta 8554 usando [RootEncoder](https://github.com/pedroSG94/RootEncoder)
-- **🌐 Painel Web** na porta 8080 com interface moderna
-- **🎥 4 Câmeras** - Wide, Ultra Wide, Telephoto e Frontal
-- **⚙️ Controles Manuais** - ISO (50-3200), Exposição (1/8000s - 30s), Foco, Balanço de Branco
-- **⚡ Baixa Latência** - Ideal para monitoramento em tempo real
-- **📱 Android 7.0+** (API 24+)
+Aplicativo Android para **transmissão ao vivo via RTMP** com controle completo da câmera pelo hardware Camera2 API e painel web de controle remoto acessível pela rede local.
 
 ---
 
-## 📸 Screenshots
+## Stack Técnica
 
-### Painel Web de Controle
-![Web Control Panel](https://via.placeholder.com/800x500/1e293b/38bdf8?text=Painel+Web+de+Controle)
-
-### App Android
-![Android App](https://via.placeholder.com/400x800/0f172a/38bdf8?text=App+Android)
+| Camada | Tecnologia |
+|---|---|
+| Linguagem | Kotlin |
+| Build | Gradle (Groovy) |
+| Camera API | Android Camera2 API |
+| Streaming | [RootEncoder](https://github.com/pedroSG94/RootEncoder) v2.4.5 via JitPack |
+| Preview | `OpenGlView` (RootEncoder) |
+| Servidor Web | `WebControlServer` — HTTP embutido porta **8080** |
+| Protocolo principal | **RTMP** |
+| Persistência | `SharedPreferences` |
+| Background | `ForegroundService` + `WakeLock` |
 
 ---
 
-## 🛠️ Arquitetura
+## Quickstart
+
+### Requisitos
+- Android 8.0+ (API 26)
+- Permissões: `CAMERA`, `RECORD_AUDIO`, `INTERNET`, `FOREGROUND_SERVICE`
+- Android 13+: `POST_NOTIFICATIONS`
+
+### Instalação
+1. Clone o repositório
+2. Abra no Android Studio
+3. Build → Run no dispositivo
+
+### Primeiro uso
+1. Abra o app — conceda as permissões solicitadas
+2. Toque no ⚙️ para abrir o painel de configurações
+3. Insira a URL RTMP do seu servidor (ex: `rtmp://192.168.1.100:1935/live/stream`)
+4. Toque em **Aplicar**
+5. Toque no botão shutter para iniciar a transmissão
+
+### Grade de composição
+- **Long-press** no preview ativa/desativa a grade de regra dos terços
+- A preferência é salva automaticamente
+
+---
+
+## Painel Web de Controle (WebGUI)
+
+Com o app rodando, acesse pelo browser da rede local:
 
 ```
-┌────────────────────────────────────────────────────┐
-│          Samsung Galaxy Note10+ (Android)             │
-│  ┌──────────────────────────────────────────┐  │
-│  │        Camera2 API Controller            │  │
-│  │  - 4 Lentes (Wide/UltraWide/Tele/Front)  │  │
-│  │  - Controle Manual (ISO/Exp/Focus/WB)    │  │
-│  └─────────────┬────────────────────────────┘  │
-│           │                               │
-│  ┌────────┴─────────┐      ┌────────┴────────┐  │
-│  │  RTSP Server  │      │  HTTP Server  │  │
-│  │  Porta: 8554  │      │  Porta: 8080  │  │
-│  │  RootEncoder  │      │  NanoHTTPD    │  │
-│  └──────┬────────┘      └──────┬───────┘  │
-└─────────│───────────────────────│───────────┘
-         │  Stream H.264         │  HTTP/JSON
-         │  1280x720@30fps      │  REST API
-         │                      │
-    WiFi │ Local Network        │
-         │                      │
-         │                      │
-┌────────┴─────────────────────┴─────────┐
-│          Windows 10 PC (mesma rede WiFi)          │
-│  ┌──────────────┐      ┌────────────────┐  │
-│  │  VLC / OBS    │      │  Navegador Web  │  │
-│  │  RTSP Client  │      │  Chrome/Edge    │  │
-│  │  Ver Stream   │      │  Controlar App  │  │
-│  └──────────────┘      └────────────────┘  │
-└──────────────────────────────────────────────┘
+http://<IP-DO-CELULAR>:8080
 ```
+
+O IP local é exibido na barra de status do app.
+
+### Controles disponíveis na WebGUI
+
+| Controle | Parâmetro |
+|---|---|
+| Iniciar / Parar stream | `startStream` / `stopStream` |
+| ISO manual | `iso` (ex: `800`) |
+| Velocidade do obturador | `shutterSpeed` (ex: `1/60`) |
+| Compensação de exposição | `exposure` (EV, modo auto) |
+| Foco | `focus` + `focusmode` (af / manual) |
+| Balanço de branco | `whiteBalance` (auto, daylight, cloudy, tungsten, fluorescent) |
+| Zoom | `zoom` (0.0 – 1.0) |
+| Lanterna | `lantern` (true/false) |
+| OIS / EIS | `ois` / `eis` (true/false) |
+| Bitrate em voo | `bitrate` (ex: `4000000`) |
+| FPS | `fps` (ex: `30`) |
+| Resolução | `resolution` (4k / 1080p / 720p / WxH) |
+| Troca de câmera | `camera` (id) |
+| Redução de ruído | `noiseReduction` |
+| Edge mode | `edgeMode` |
 
 ---
 
-## 🚀 Começando
+## Configuração MediaMTX (servidor RTMP local)
 
-### 📍 Pré-requisitos
+Para testar localmente sem um servidor externo, use o [MediaMTX](https://github.com/bluenviron/mediamtx).
 
-- **Android Studio** Hedgehog (2023.1.1) ou superior
-- **Android SDK** API 24+ (Android 7.0 Nougat ou superior)
-- **Samsung Galaxy Note10+** ou dispositivo com múltiplas câmeras
-- **Rede WiFi** local para comunicação PC ↔ Android
-
-### 📦 Instalação
-
-1. **Clone o repositório:**
+### Instalação rápida
 
 ```bash
-git clone https://github.com/luanscps/camera2api-brSS.git
-cd camera2api-brSS
+# Linux / macOS
+curl -L https://github.com/bluenviron/mediamtx/releases/latest/download/mediamtx_linux_amd64.tar.gz | tar xz
+./mediamtx
 ```
 
-2. **Abra no Android Studio:**
-   - File → Open → Selecione a pasta do projeto
+### Configuração mínima (`mediamtx.yml`)
 
-3. **Sync Gradle:**
-   - Aguarde o Android Studio baixar as dependências
+```yaml
+rtmp:
+  enable: yes
+  address: :1935
 
-4. **Conecte o Note10+ via USB:**
-   - Ative **Depuração USB** nas Opções do Desenvolvedor
-
-5. **Build e Instale:**
-   - Clique em **Run** (Shift+F10)
-   - Ou use: `./gradlew installDebug`
-
----
-
-## 🎮 Como Usar
-
-### 1️⃣ No Android (Note10+)
-
-1. Abra o app **Camera2 RTSP Server**
-2. Conceda permissões de Câmera e Áudio
-3. Anote os endereços exibidos:
-   ```
-   📡 RTSP Stream: rtsp://192.168.0.XXX:8554/live
-   🌐 Painel Web: http://192.168.0.XXX:8080
-   ```
-
-### 2️⃣ No PC - Abrir Painel de Controle
-
-1. Abra o navegador (Chrome/Edge/Firefox)
-2. Digite: `http://192.168.0.XXX:8080`
-3. Você verá o painel de controle:
-   - Seleção de câmera
-   - Ajuste de ISO
-   - Controle de exposição
-   - Ajuste de foco
-   - Balanço de branco
-
-### 3️⃣ No PC - Ver Stream
-
-**VLC Player:**
-```
-1. Mídia → Abrir Fluxo de Rede
-2. Cole: rtsp://192.168.0.XXX:8554/live
-3. Clique em Reproduzir
+paths:
+  live:
+    source: publisher
 ```
 
-**OBS Studio:**
+### URL no app
 ```
-1. Fontes → Adicionar → Media Source
-2. Desmarque "Local File"
-3. Input: rtsp://192.168.0.XXX:8554/live
-4. Marque "Use hardware decoding"
-5. OK
+rtmp://<IP-DA-MAQUINA>:1935/live/stream
 ```
 
-### 4️⃣ Controlar em Tempo Real
-
-- Ajuste ISO no painel web → veja mudança instantânea no VLC/OBS
-- Mude exposição → imagem fica mais clara/escura
-- Troque de câmera → alterne entre Wide/UltraWide/Telephoto/Frontal
-- Ajuste foco manual → controle preciso da nitidez
-
----
-
-## 📚 Dependências
-
-### Bibliotecas Principais
-
-| Biblioteca | Versão | Propósito |
-|-----------|--------|----------|
-| [RootEncoder](https://github.com/pedroSG94/RootEncoder) | 2.4.5 | Streaming RTSP/RTMP profissional |
-| [NanoHTTPD](https://github.com/NanoHttpd/nanohttpd) | 2.3.1 | Servidor HTTP leve |
-| Gson | 2.10.1 | Serialização JSON |
-| Kotlin Coroutines | 1.7.3 | Operações assíncronas |
-
-### Permissões Android
-
-```xml
-<uses-permission android:name="android.permission.CAMERA" />
-<uses-permission android:name="android.permission.RECORD_AUDIO" />
-<uses-permission android:name="android.permission.INTERNET" />
-<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-<uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-```
-
----
-
-## 🛡️ Configuração do Firewall
-
-**Windows 10/11:**
-
-```powershell
-# Liberar porta RTSP (8554)
-New-NetFirewallRule -DisplayName "RTSP Server" -Direction Inbound -Protocol TCP -LocalPort 8554 -Action Allow
-
-# Liberar porta HTTP (8080)
-New-NetFirewallRule -DisplayName "HTTP Control Panel" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow
-```
-
----
-
-## ⚙️ Parâmetros de Streaming
-
-| Parâmetro | Valor | Descrição |
-|----------|-------|-------------|
-| Resolução | 1280x720 | HD 720p |
-| Frame Rate | 30 FPS | Fluidez ideal |
-| Bitrate | 2500 kbps | Qualidade vs latência |
-| Codec | H.264 | Compatibilidade universal |
-| Protocolo | RTSP/RTP | Baixa latência |
-| Porta RTSP | 8554 | Padrão RTSP |
-| Porta HTTP | 8080 | Painel web |
-
----
-
-## 📊 Performance
-
-- **Latência:** 200-500ms (WiFi local)
-- **Taxa de quadros:** 30 FPS estável
-- **Consumo de rede:** ~2.5 Mbps
-- **Uso de CPU (Note10+):** 15-25%
-- **Uso de bateria:** Médio-alto (recomendado manter conectado)
-
----
-
-## 🔧 Solução de Problemas
-
-### ❌ Erro: bind failed: EADDRINUSE (Address already in use)
-
-**Causa mais comum:** VPN ativa no dispositivo Android
-
-Quando uma VPN está ativa, ela cria uma interface de rede virtual que intercepta todo o tráfego. Isso impede que o servidor RTSP consiga fazer bind na porta 8554 da interface de rede real.
-
-**Solução:**
-1. **Desative qualquer VPN** no dispositivo Android:
-   - WireGuard
-   - OpenVPN
-   - Cisco AnyConnect
-   - Ou qualquer outro cliente VPN
-2. Reinicie o app
-3. Verifique o acesso: `rtsp://<IP>:8554/live`
-
-**Outras causas possíveis:**
-- App não foi fechado corretamente (use **Force Stop** nas configurações)
-- Outro app usando porta 8554
-- Reinicie o dispositivo se o problema persistir
-
-**Verificação via ADB:**
+### Visualizar o stream
 ```bash
-# Ver se a porta está em uso
-adb shell netstat -tuln | grep 8554
-
-# Force stop do app
-adb shell am force-stop com.camera2rtsp
-
-# Ver logs do erro
-adb logcat | grep "RtspServer\|EADDRINUSE\|BindException"
+ffplay rtmp://localhost:1935/live/stream
+# ou
+vlc rtmp://localhost:1935/live/stream
 ```
 
 ---
 
-### Problema: Não consigo acessar o painel web
+## Capabilities da Câmera
 
-**Solução:**
-- Verifique se PC e Note10+ estão na **mesma rede WiFi**
-- Desative firewall temporariamente para testar
-- Use `ipconfig` (Windows) para verificar subnet
-- Tente `http://IP:8080` em vez de `https://`
+O app descobre automaticamente as capacidades do hardware via `Camera2Controller.discoverAllCameras()`. Informações expostas:
 
-### Problema: Stream não aparece no VLC
+- **Hardware Level**: LEGACY / LIMITED / FULL / LEVEL_3
+- **Facing**: FRONT / BACK / EXTERNAL
+- **ISO Range**: mín – máx (ex: 50–3200)
+- **Exposure Range**: mín – máx em EV
+- **FPS Ranges**: todos os ranges suportados
+- **Resoluções**: lista completa de saídas de vídeo
+- **AF Modes**: CONTINUOUS_VIDEO, AUTO, OFF, MACRO, etc.
+- **AE Modes**: ON, OFF, ON_ALWAYS_FLASH, etc.
+- **AWB Modes**: AUTO, DAYLIGHT, CLOUDY, TUNGSTEN, FLUORESCENT, etc.
+- **Flash**: suportado (true/false)
+- **OIS**: estabilização óptica (true/false)
+- **Focal Lengths**: distâncias focais disponíveis
+- **Abertura**: f/número(s) disponíveis
 
-**Solução:**
-- Aguarde 5-10 segundos após abrir o app Android
-- Verifique se usou `rtsp://` no início da URL
-- No VLC: Ferramentas → Preferências → Input/Codecs → Aumente o cache de rede
-- Teste com: `ffplay rtsp://IP:8554/live`
-
-### Problema: Latência muito alta (>1 segundo)
-
-**Solução:**
-- Use conexão WiFi 5GHz se disponível
-- Reduza bitrate em `RtspServerPedro.kt` (linha 20): `2500` → `1500`
-- No VLC: Ferramentas → Preferências → Input/Codecs → Reduza cache
-- Feche outros apps no Note10+ que usem câmera
+Todas as capabilities são enviadas para a WebGUI e usadas para popular os controles dinamicamente.
 
 ---
 
-## 🔥 Próximos Passos
+## Tonemap / Curvas de Cor
 
-- [ ] Suporte a áudio AAC
-- [ ] Autenticação HTTP Basic
-- [ ] Gravação de stream em MP4
-- [ ] Suporte a múltiplas resoluções
-- [ ] Interface web responsiva para mobile
-- [ ] Suporte a RTMPS (RTMP Secure)
-- [ ] Configuração de bitrate dinâmica
+O `Camera2Controller` suporta controle de pós-processamento via `CaptureRequest`:
 
----
+| Parâmetro | Chave | Valores |
+|---|---|---|
+| Edge Enhancement | `edgeMode` | `OFF`, `FAST`, `HIGH_QUALITY`, `ZERO_SHUTTER_LAG` |
+| Noise Reduction | `noiseReduction` | `OFF`, `FAST`, `HIGH_QUALITY`, `MINIMAL`, `ZERO_SHUTTER_LAG` |
+| Hot Pixel | `hotPixel` | `OFF`, `FAST`, `HIGH_QUALITY` |
+| Tonemap | interno | `FAST`, `HIGH_QUALITY`, `CONTRAST_CURVE` |
 
-## 📜 Licença
-
-MIT License - veja [LICENSE](LICENSE) para detalhes.
+> **Nota:** O controle de tonemap por curvas personalizadas (`CONTRAST_CURVE`) requer hardware level `FULL` ou superior. Em dispositivos `LIMITED`/`LEGACY` o modo é ignorado silenciosamente.
 
 ---
 
-## 👏 Créditos
+## Arquitetura
 
-- [RootEncoder](https://github.com/pedroSG94/RootEncoder) by Pedro Santos - Excelente biblioteca RTSP
-- [NanoHTTPD](https://github.com/NanoHttpd/nanohttpd) - Servidor HTTP minimalista
-- Camera2 API - API oficial de câmera do Android
-
----
-
-## ❤️ Contribuindo
-
-Contribuições são bem-vindas!
-
-1. Fork o projeto
-2. Crie uma branch: `git checkout -b feature/MinhaFeature`
-3. Commit: `git commit -m 'Adiciona MinhaFeature'`
-4. Push: `git push origin feature/MinhaFeature`
-5. Abra um Pull Request
-
----
-
-## 📧 Contato
-
-**Luan Silva**
-- GitHub: [@luanscps](https://github.com/luanscps)
-- Email: luanscps@gmail.com
+```
+MainActivity
+    │
+    ├─ bind ──► StreamingService (ForegroundService)
+    │               │
+    │               ├─ RtmpStreamer (wrapper RootEncoder RtmpCamera2)
+    │               │       └─ Camera2Controller (Camera2 API + reflection)
+    │               │               └─ CameraCapabilitiesReader
+    │               │                       └─ CameraCapabilities (data class)
+    │               │
+    │               └─ WebControlServer (HTTP :8080)
+    │                       └─ WebControlHtml (HTML/JS/CSS inline)
+    │
+    └─ GridOverlayView (overlay de grade no preview)
+```
 
 ---
 
-## ⭐ Mostre seu apoio
+## Changelog
 
-Se este projeto ajudou você, dê uma ⭐ no repositório!
+### v4-ui (branch atual)
+- Nova UI nativa Android substituindo a interface web no celular
+- `isStreaming` sincronizado diretamente do `StreamingService` (sem dessincronização)
+- `clientsBadge` atualizado no HUD a cada segundo via `WebControlServer.connectedClients`
+- `GridOverlayView` ativável por long-press no preview com persistência
+- Remoção de código morto: `RtspServer.kt` (orphan), `build.gradle.kts` (duplicata)
+- Documentação consolidada em README único
 
----
+### v3
+- Suporte RTMP via RootEncoder v2.4.5
+- WebGUI completa portada da v3 (HTML/JS embutido no APK)
+- Controles Camera2 via reflection: ISO, SS, WB, Zoom, Focus, OIS, EIS, Bitrate, FPS
+- WebControlServer HTTP na porta 8080
 
-<p align="center">
-  <strong>Feito com ❤️ usando Camera2 API, Kotlin e muita cafeina ☕</strong>
-</p>
+### v2
+- Streaming RTSP via RootEncoder
+- Controles básicos de câmera
+
+### v1
+- Prova de conceito inicial
