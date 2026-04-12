@@ -5,6 +5,8 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.CaptureResult
+import android.hardware.camera2.TotalCaptureResult
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
@@ -45,6 +47,34 @@ class Camera2Controller {
     var hotPixelMode       = CameraMetadata.HOT_PIXEL_MODE_HIGH_QUALITY
 
     // -------------------------------------------------------------------------
+    // Zoom Óptico — lista de focal lengths disponíveis no dispositivo
+    // opticalZoomIndex = índice na lista; -1 = não ativo (usa zoom digital)
+    // -------------------------------------------------------------------------
+    var opticalZoomLevels: List<Float> = emptyList()   // populado em discoverAllCameras
+    var opticalZoomIndex  = -1                         // -1 = inativo
+
+    // -------------------------------------------------------------------------
+    // WB Manual por canal RGGB
+    // rggbGains[0]=R, [1]=Gr, [2]=Gb, [3]=B  (1.0f = neutro)
+    // rggbEnabled=false => usa AWB normal
+    // -------------------------------------------------------------------------
+    var rggbEnabled = false
+    var rggbGains   = floatArrayOf(1f, 1f, 1f, 1f)
+
+    // -------------------------------------------------------------------------
+    // Monitor Ao Vivo — atualizado pelo setCustomOnCaptureCompletedCallback
+    // Leitura thread-safe via @Volatile; WebControlApi lê direto
+    // -------------------------------------------------------------------------
+    @Volatile var liveIso        = 0
+    @Volatile var liveExposureNs = 0L
+    @Volatile var liveRggbR      = 1f
+    @Volatile var liveRggbGr     = 1f
+    @Volatile var liveRggbGb     = 1f
+    @Volatile var liveRggbB      = 1f
+    @Volatile var liveAfState    = "unknown"
+    @Volatile var liveAeState    = "unknown"
+
+    // -------------------------------------------------------------------------
     // Worker thread — todas as operações de câmera passam por aqui
     // -------------------------------------------------------------------------
 
@@ -55,10 +85,6 @@ class Camera2Controller {
 
     // -------------------------------------------------------------------------
     // Melhoria 1 + 2: Reflection com lazy cache e flag de validação
-    //
-    // Os campos e métodos refletidos são resolvidos UMA ÚNICA VEZ na primeira
-    // chamada (lazy). Se a lib RootEncoder mudar os nomes internos, o flag
-    // reflectionAvailable fica false e o app não crasha — apenas loga aviso.
     // -------------------------------------------------------------------------
 
     private val reflField_cameraManager: java.lang.reflect.Field? by lazy {
@@ -86,7 +112,6 @@ class Camera2Controller {
          .getOrNull()
     }
 
-    // Flag calculado lazy: true somente se todos os três campos/métodos existem
     val reflectionAvailable: Boolean by lazy {
         val ok = reflField_cameraManager != null &&
                  reflField_builderInputSurface != null &&
@@ -97,7 +122,7 @@ class Camera2Controller {
     }
 
     // -------------------------------------------------------------------------
-    // Helpers de reflection (usam cache, sem getDeclaredField repetido)
+    // Helpers de reflection
     // -------------------------------------------------------------------------
 
     private fun getCam2Manager(): Camera2ApiManager? {
@@ -119,10 +144,45 @@ class Camera2Controller {
     }
 
     // -------------------------------------------------------------------------
-    // Melhoria 3 + 4: applyPostProcessing com debounce no worker thread
-    //
-    // Se edgeMode, noiseReduction e hotPixel mudarem juntos (ex: preset),
-    // o builder é aplicado apenas UMA vez após 50ms, não três vezes.
+    // Monitor ao vivo — registra o callback no Camera2ApiManager via reflection
+    // Chamado uma vez após a câmera abrir (initLiveMonitor)
+    // -------------------------------------------------------------------------
+
+    fun initLiveMonitor() {
+        val cam2mgr = getCam2Manager() ?: return
+        runCatching {
+            cam2mgr.setCustomOnCaptureCompletedCallback { result: TotalCaptureResult ->
+                liveIso        = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: liveIso
+                liveExposureNs = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: liveExposureNs
+                val rggb = result.get(CaptureResult.COLOR_CORRECTION_GAINS)
+                if (rggb != null) {
+                    liveRggbR  = rggb[0]
+                    liveRggbGr = rggb[1]
+                    liveRggbGb = rggb[2]
+                    liveRggbB  = rggb[3]
+                }
+                liveAfState = when (result.get(CaptureResult.CONTROL_AF_STATE)) {
+                    CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED      -> "focused"
+                    CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED  -> "not_focused"
+                    CaptureResult.CONTROL_AF_STATE_ACTIVE_SCAN         -> "scanning"
+                    CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED     -> "passive_focused"
+                    CaptureResult.CONTROL_AF_STATE_PASSIVE_SCAN        -> "passive_scan"
+                    else                                                -> "idle"
+                }
+                liveAeState = when (result.get(CaptureResult.CONTROL_AE_STATE)) {
+                    CaptureResult.CONTROL_AE_STATE_CONVERGED    -> "converged"
+                    CaptureResult.CONTROL_AE_STATE_SEARCHING    -> "searching"
+                    CaptureResult.CONTROL_AE_STATE_LOCKED       -> "locked"
+                    CaptureResult.CONTROL_AE_STATE_FLASH_REQUIRED -> "flash_required"
+                    else                                         -> "idle"
+                }
+            }
+            Log.i(tag, "[liveMonitor] callback registrado com sucesso")
+        }.onFailure { Log.w(tag, "[liveMonitor] setCustomOnCaptureCompletedCallback falhou: ${it.message}") }
+    }
+
+    // -------------------------------------------------------------------------
+    // Post Processing com debounce
     // -------------------------------------------------------------------------
 
     private var postProcPending = false
@@ -143,12 +203,42 @@ class Camera2Controller {
             postProcPending = true
             worker.postDelayed(postProcRunnable, 50)
         }
-        // Se já estava pendente, apenas atualiza os valores — o Runnable usará
-        // os campos mais recentes quando executar (captura por referência)
     }
 
     // -------------------------------------------------------------------------
-    // Sensor manual / auto — execução no worker thread
+    // Aplica gains RGGB via builder (WB Manual)
+    // -------------------------------------------------------------------------
+
+    private fun applyRggbGains() {
+        post {
+            val ok = applyOnBuilder { b ->
+                // Desativa AWB automático para aplicar ganhos manuais
+                b.set(CaptureRequest.CONTROL_AWB_MODE, CameraMetadata.CONTROL_AWB_MODE_OFF)
+                val rggb = android.hardware.camera2.params.RggbChannelVector(
+                    rggbGains[0], rggbGains[1], rggbGains[2], rggbGains[3]
+                )
+                b.set(CaptureRequest.COLOR_CORRECTION_MODE, CameraMetadata.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX)
+                b.set(CaptureRequest.COLOR_CORRECTION_GAINS, rggb)
+            }
+            Log.d(tag, "rggbGains ok=$ok R=${rggbGains[0]} Gr=${rggbGains[1]} Gb=${rggbGains[2]} B=${rggbGains[3]}")
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Aplica zoom óptico via LENS_FOCAL_LENGTH
+    // -------------------------------------------------------------------------
+
+    private fun applyOpticalZoom(focalLength: Float) {
+        post {
+            val ok = applyOnBuilder { b ->
+                b.set(CaptureRequest.LENS_FOCAL_LENGTH, focalLength)
+            }
+            Log.d(tag, "opticalZoom ok=$ok focalLength=$focalLength")
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Sensor manual / auto
     // -------------------------------------------------------------------------
 
     private fun applyManualSensor() {
@@ -261,6 +351,8 @@ class Camera2Controller {
 
         params["whiteBalance"]?.let {
             whiteBalanceMode = it as String
+            // Ao trocar modo AWB desativa RGGB manual
+            rggbEnabled = false
             val mode = when (whiteBalanceMode) {
                 "daylight"                 -> CameraMetadata.CONTROL_AWB_MODE_DAYLIGHT
                 "cloudy"                   -> CameraMetadata.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT
@@ -272,6 +364,48 @@ class Camera2Controller {
             Log.d(tag, "WB -> $whiteBalanceMode")
         }
 
+        // ── WB Manual RGGB ────────────────────────────────────────────────────
+        // Parâmetros individuais: rggbR, rggbGr, rggbGb, rggbB  (Float 0.1–4.0)
+        // Parâmetro combinado:   rggbGains = [r, gr, gb, b]
+        // ─────────────────────────────────────────────────────────────────────
+        var rggbDirty = false
+
+        params["rggbR"]?.let {
+            rggbGains[0] = toFloat(it).coerceIn(0.1f, 4f)
+            rggbEnabled = true; rggbDirty = true
+        }
+        params["rggbGr"]?.let {
+            rggbGains[1] = toFloat(it).coerceIn(0.1f, 4f)
+            rggbEnabled = true; rggbDirty = true
+        }
+        params["rggbGb"]?.let {
+            rggbGains[2] = toFloat(it).coerceIn(0.1f, 4f)
+            rggbEnabled = true; rggbDirty = true
+        }
+        params["rggbB"]?.let {
+            rggbGains[3] = toFloat(it).coerceIn(0.1f, 4f)
+            rggbEnabled = true; rggbDirty = true
+        }
+        (params["rggbGains"] as? List<*>)?.let { list ->
+            if (list.size >= 4) {
+                rggbGains[0] = toFloat(list[0]).coerceIn(0.1f, 4f)
+                rggbGains[1] = toFloat(list[1]).coerceIn(0.1f, 4f)
+                rggbGains[2] = toFloat(list[2]).coerceIn(0.1f, 4f)
+                rggbGains[3] = toFloat(list[3]).coerceIn(0.1f, 4f)
+                rggbEnabled = true; rggbDirty = true
+            }
+        }
+        params["rggbReset"]?.let {
+            rggbGains = floatArrayOf(1f, 1f, 1f, 1f)
+            rggbEnabled = false
+            // Restaura AWB automático
+            cam.enableAutoWhiteBalance(CameraMetadata.CONTROL_AWB_MODE_AUTO)
+            whiteBalanceMode = "auto"
+            Log.d(tag, "rggbReset")
+        }
+        if (rggbDirty) applyRggbGains()
+
+        // ── Zoom Digital ──────────────────────────────────────────────────────
         params["zoom"]?.let {
             val z = when (it) {
                 is Double -> it.toFloat()
@@ -279,9 +413,31 @@ class Camera2Controller {
                 else      -> it.toString().toFloatOrNull() ?: 0f
             }.coerceIn(0f, 1f)
             zoomLevel = z
+            opticalZoomIndex = -1  // ao usar zoom digital, cancela óptico ativo
             val zr = cam.zoomRange
             cam.setZoom(zr.lower + z * (zr.upper - zr.lower))
             Log.d(tag, "zoom -> $z (real=${zr.lower + z * (zr.upper - zr.lower)})")
+        }
+
+        // ── Zoom Óptico ───────────────────────────────────────────────────────
+        // Parâmetro: opticalZoom = índice na lista opticalZoomLevels
+        params["opticalZoom"]?.let { raw ->
+            val idx = when (raw) {
+                is Double -> raw.toInt()
+                is Number -> raw.toInt()
+                else      -> raw.toString().toIntOrNull() ?: -1
+            }
+            if (idx >= 0 && idx < opticalZoomLevels.size) {
+                opticalZoomIndex = idx
+                applyOpticalZoom(opticalZoomLevels[idx])
+                // Reseta zoom digital ao 1x ao trocar lente óptica
+                zoomLevel = 0f
+                val zr = cam.zoomRange
+                cam.setZoom(zr.lower)
+                Log.d(tag, "opticalZoom idx=$idx focalLength=${opticalZoomLevels[idx]}mm")
+            } else {
+                Log.w(tag, "opticalZoom idx=$idx inválido (disponíveis: ${opticalZoomLevels.size})")
+            }
         }
 
         params["lantern"]?.let {
@@ -357,8 +513,16 @@ class Camera2Controller {
 
         params["camera"]?.let { value ->
             currentCameraId = value as String
+            // Ao trocar câmera, recalcula focal lengths disponíveis e reseta zoom óptico
+            opticalZoomIndex = -1
+            appContext?.let { ctx ->
+                val newCaps = discoverAllCameras(ctx).firstOrNull { it.cameraId == currentCameraId }
+                opticalZoomLevels = newCaps?.focalLengths ?: emptyList()
+                Log.d(tag, "camera=$currentCameraId opticalZoomLevels=$opticalZoomLevels")
+            }
             post {
                 cam.switchCamera(currentCameraId)
+                initLiveMonitor() // registra callback na nova câmera
                 if (manualSensor) applyManualSensor()
                 else if (!autoFocus && focusDistance > 0f) cam.setFocusDistance(focusDistance)
                 Log.d(tag, "camera -> $currentCameraId")
@@ -391,8 +555,6 @@ class Camera2Controller {
             }
         }
 
-        // Melhoria 3: edgeMode, noiseReduction e hotPixel usam schedulePostProcessing()
-        // para aplicar o builder UMA única vez mesmo quando os três mudam juntos
         params["edgeMode"]?.let {
             edgeMode = when (it as String) {
                 "off"  -> CameraMetadata.EDGE_MODE_OFF
@@ -423,6 +585,18 @@ class Camera2Controller {
             schedulePostProcessing()
             Log.d(tag, "hotPixel -> $it")
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
+    private fun toFloat(v: Any?): Float = when (v) {
+        is Double -> v.toFloat()
+        is Float  -> v
+        is Number -> v.toFloat()
+        is String -> v.toFloatOrNull() ?: 1f
+        else      -> 1f
     }
 
     private fun parseTimeParam(raw: Any, default: Long): Long = when (raw) {
