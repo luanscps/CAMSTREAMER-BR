@@ -5,12 +5,12 @@ plugins {
 
 android {
     namespace = "com.camera2rtsp"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.camera2rtsp"
         minSdk = 29
-        targetSdk = 34
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
     }
@@ -49,7 +49,6 @@ dependencies {
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
-    // RootEncoder via modulo local (clonado em ../RootEncoder)
-    // INSTRUCOES: veja o README.md secao "Setup RootEncoder Local"
+    // RootEncoder 2.7.2 via modulo local (clonado em ../RootEncoder)
     implementation(project(":library"))
 }
