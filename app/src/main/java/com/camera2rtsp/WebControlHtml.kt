@@ -288,6 +288,11 @@ object WebControlHtml {
         sb.append("var _caps=null;var _currentCamId='0';var _isManual=false;")
         sb.append("var _toastTimer;var _pollFail=0;")
         sb.append("var _brT,_zT,_fT,_iT,_eT,_shT,_frT;")
+        // ── HEARTBEAT: UUID único por aba, ping a cada 5s ──────────────────
+        sb.append("var _hbCid=(typeof crypto!=='undefined'&&crypto.randomUUID)?crypto.randomUUID():Math.random().toString(36).slice(2)+Date.now();")
+        sb.append("function sendHeartbeat(){fetch('/api/heartbeat?cid='+encodeURIComponent(_hbCid)).catch(function(){});}")
+        sb.append("sendHeartbeat();setInterval(sendHeartbeat,5000);")
+        // ─────────────────────────────────────────────────────────────────
         sb.append("function showToast(msg,isErr){var t=document.getElementById('toast');")
         sb.append("t.textContent=msg;t.className=isErr?'err':'ok';t.classList.add('show');")
         sb.append("clearTimeout(_toastTimer);_toastTimer=setTimeout(function(){t.classList.remove('show');},1800);}")
