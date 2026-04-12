@@ -60,6 +60,12 @@ object WebControlHtml {
         sb.append("button:hover{background:var(--accent);color:#0f172a;border-color:var(--accent)}")
         sb.append("button:active{transform:scale(.93)}")
         sb.append("button.active{background:var(--green);color:#fff;border-color:var(--green)}")
+        sb.append("button.btn-start{background:rgba(16,185,129,.15);border-color:var(--green);color:var(--green)}")
+        sb.append("button.btn-start:hover{background:var(--green);color:#fff}")
+        sb.append("button.btn-restart{background:rgba(245,158,11,.12);border-color:var(--yellow);color:var(--yellow)}")
+        sb.append("button.btn-restart:hover{background:var(--yellow);color:#0f172a}")
+        sb.append("button.btn-stop{background:rgba(239,68,68,.12);border-color:var(--red);color:var(--red)}")
+        sb.append("button.btn-stop:hover{background:var(--red);color:#fff}")
         sb.append("button.preset-quality{background:rgba(168,85,247,.18);border-color:var(--purple);color:var(--purple)}")
         sb.append("button.preset-quality:hover{background:var(--purple);color:#fff;border-color:var(--purple)}")
         sb.append("button.preset-fast{background:rgba(245,158,11,.12);border-color:var(--yellow);color:var(--yellow)}")
@@ -115,6 +121,8 @@ object WebControlHtml {
         sb.append(".rtmp-row input{flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border);")
         sb.append("padding:9px 12px;border-radius:10px;font-size:12px;outline:none}")
         sb.append(".rtmp-row input:focus{border-color:var(--accent)}")
+        sb.append(".stream-actions{display:flex;gap:8px;margin-top:10px}")
+        sb.append(".stream-actions button{flex:1;font-size:12px;padding:10px 8px;min-height:44px}")
         sb.append("</style></head><body>")
         sb.append("<div class=\"container\">")
         sb.append("<div class=\"header\"><h1>\uD83C\uDFA5 Camera2 RTMP Control</h1>")
@@ -130,12 +138,17 @@ object WebControlHtml {
         sb.append("<div class=\"badge\" id=\"badge-manual\" style=\"display:none\">\uD83C\uDFAC Manual</div>")
         sb.append("</div>")
 
-        // RTMP URL card
+        // RTMP URL card — com botões de controle do stream
         sb.append("<div class=\"card\"><h3>\uD83D\uDCE1 RTMP Stream</h3>")
         sb.append("<div class=\"info-row\"><div class=\"info-pill\">URL: <span id=\"info-rtmpurl\" style=\"word-break:break-all\">-</span></div></div>")
         sb.append("<div class=\"rtmp-row\">")
         sb.append("<input type=\"text\" id=\"rtmp-input\" placeholder=\"rtmp://servidor/live/chave\">")
-        sb.append("<button onclick=\"applyRtmpUrl(this)\">Aplicar</button>")
+        sb.append("<button class=\"btn-start\" onclick=\"applyRtmpUrl(this)\">\u2713 Aplicar</button>")
+        sb.append("</div>")
+        sb.append("<div class=\"stream-actions\">")
+        sb.append("<button class=\"btn-start\" onclick=\"streamAction('start',this)\">\u25B6 Iniciar</button>")
+        sb.append("<button class=\"btn-restart\" onclick=\"streamAction('restart',this)\">\uD83D\uDD04 Reiniciar</button>")
+        sb.append("<button class=\"btn-stop\" onclick=\"streamAction('stop',this)\">\u25A0 Parar</button>")
         sb.append("</div></div>")
 
         // Estado da Camera
@@ -338,6 +351,10 @@ object WebControlHtml {
         sb.append("if(show){el.classList.remove('hidden');}else{el.classList.add('hidden');}}")
         sb.append("function applyRtmpUrl(btn){var inp=document.getElementById('rtmp-input');")
         sb.append("var url=inp.value.trim();if(!url)return;sendControl({rtmpUrl:url},btn,'RTMP atualizado');}")
+        // streamAction — novo
+        sb.append("function streamAction(action,btn){")
+        sb.append("var msgs={start:'Stream iniciado',restart:'Stream reiniciado',stop:'Stream parado'};")
+        sb.append("sendControl({streamAction:action},btn,msgs[action]||action);}")
         sb.append("function updateManualUI(isManual){_isManual=isManual;")
         sb.append("var badge=document.getElementById('badge-manual');")
         sb.append("if(badge)badge.style.display=isManual?'flex':'none';")

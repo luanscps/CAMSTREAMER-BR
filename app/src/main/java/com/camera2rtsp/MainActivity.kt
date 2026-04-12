@@ -51,7 +51,7 @@ class MainActivity : AppCompatActivity() {
 
     // -- Estado --------------------------------------------------------------
     private var isPanelOpen = false
-    // Fix 1: isStreaming agora é computed property — lê diretamente do service
+    // Fix 1: isStreaming lê diretamente do service
     private val isStreaming: Boolean
         get() = service?.rtmpStreamer?.isStreaming ?: false
 
@@ -170,13 +170,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupBottomActions() {
         btnShutter.setOnClickListener {
-            // Fix 1: lê estado real do service antes de decidir ação
+            // Fix 1: lê estado real do service antes de agir
             if (isStreaming) {
                 service?.stopStream()
             } else {
                 service?.startStream()
             }
-            // Atualiza visual do botão imediatamente (o tickHud sincroniza em até 1s)
+            // Visual atualizado imediatamente; tickHud sincroniza em até 1s
             btnShutter.setBackgroundResource(
                 if (!isStreaming) R.drawable.bg_shutter_active else R.drawable.bg_shutter_inner
             )
@@ -233,21 +233,21 @@ class MainActivity : AppCompatActivity() {
     private fun tickHud() {
         val streaming = isStreaming
 
-        // Badge LIVE/OFF
+        // Fix badge: LIVE = verde, OFF = vermelho
         rtspBadge.text = if (streaming) "LIVE" else "OFF"
         rtspBadge.setBackgroundResource(
-            if (streaming) R.drawable.bg_badge_red else R.drawable.bg_badge_green
+            if (streaming) R.drawable.bg_badge_green else R.drawable.bg_badge_red
         )
-        // Atualiza visual do botão shutter para refletir estado real
+        // Sincroniza botão shutter com estado real
         btnShutter.setBackgroundResource(
             if (streaming) R.drawable.bg_shutter_active else R.drawable.bg_shutter_inner
         )
 
-        // Fix 2: clientsBadge — mostra quantos browsers estão com o painel aberto
+        // Fix 2: clientsBadge — browsers com painel aberto
         val clients = service?.httpServer?.let {
             if (it.isAlive) it.connectedClients else 0
         } ?: 0
-        clientsBadge.text = if (clients > 0) "🖥 $clients" else "🖥 0"
+        clientsBadge.text = if (clients > 0) "\uD83D\uDDA5 $clients" else "\uD83D\uDDA5 0"
         clientsBadge.alpha = if (clients > 0) 1f else 0.4f
 
         // Bateria

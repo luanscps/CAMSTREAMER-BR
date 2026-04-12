@@ -108,6 +108,18 @@ object WebControlApi {
             val params = com.google.gson.Gson().fromJson<Map<String, Any>>(
                 json, object : TypeToken<Map<String, Any>>() {}.type
             )
+
+            // Ações de controle do stream via WebGUI
+            (params["streamAction"] as? String)?.let { action ->
+                val svc = StreamingService.instance
+                when (action) {
+                    "start"   -> svc?.startStream()
+                    "stop"    -> svc?.stopStream()
+                    "restart" -> svc?.let { it.stopStream(); it.startStream() }
+                }
+                return okJson("""{"status":"ok","action":"$action"}""")
+            }
+
             // Troca de URL RTMP em tempo real
             (params["rtmpUrl"] as? String)?.let { newUrl ->
                 StreamingService.instance?.let { svc ->
@@ -116,6 +128,7 @@ object WebControlApi {
                     svc.startStream()
                 }
             }
+
             cameraController.updateSettings(params)
             okJson("""{"status":"ok"}""")
         } catch (e: Exception) {
