@@ -49,9 +49,9 @@ dependencies {
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
-    // RootEncoder - unico artefato disponivel no JitPack
-    // Inclui: RtmpCamera2, RtspCamera2, Camera2Base, CameraHelper, ConnectChecker, etc.
-    // NAO existe artefato separado rtsp-server no JitPack.
-    // setCustomOnCaptureCompletedCallback adicionado na versao 2.6.7 — minimo necessario
-    implementation("com.github.pedroSG94.RootEncoder:library:2.7.2")
+    // RootEncoder — referencia direta ao commit SHA da tag 2.7.2
+    // Motivo: JitPack pode nao ter buildado a tag ainda; o hash sempre funciona.
+    // setCustomOnCaptureCompletedCallback foi adicionado na 2.6.7 (SHA: 6d45da3c3c)
+    // Hash da 2.7.2: 37c49033fba2e09d4ec441c2d1d6413d6aedc0a3 (primeiros 10 digitos usados)
+    implementation("com.github.pedroSG94.RootEncoder:library:37c49033fb")
 }
