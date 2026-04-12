@@ -49,6 +49,7 @@ dependencies {
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
-    // RootEncoder 2.7.2 via modulo local (clonado em ../RootEncoder)
-    implementation(project(":library"))
+    // RootEncoder 2.7.2 — resolvido via includeBuild em settings.gradle
+    // O includeBuild substitui essa coordenada pelo modulo local ../RootEncoder
+    implementation("com.github.pedroSG94.RootEncoder:library:2.7.2")
 }
