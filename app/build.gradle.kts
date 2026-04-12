@@ -52,5 +52,6 @@ dependencies {
     // RootEncoder - unico artefato disponivel no JitPack
     // Inclui: RtmpCamera2, RtspCamera2, Camera2Base, CameraHelper, ConnectChecker, etc.
     // NAO existe artefato separado rtsp-server no JitPack.
-    implementation("com.github.pedroSG94.RootEncoder:library:2.4.5")
+    // setCustomOnCaptureCompletedCallback adicionado na versao 2.6.7 — minimo necessario
+    implementation("com.github.pedroSG94.RootEncoder:library:2.7.2")
 }

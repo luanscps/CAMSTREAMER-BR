@@ -8,7 +8,7 @@ import com.pedro.library.rtmp.RtmpCamera2
 import com.pedro.library.view.OpenGlView
 
 /**
- * Wrapper do RtmpCamera2 (RootEncoder library:2.4.5).
+ * Wrapper do RtmpCamera2 (RootEncoder library:2.7.2).
  *
  * Dois modos:
  *  1. initWithView(OpenGlView)  -> preview visivel + stream RTMP
