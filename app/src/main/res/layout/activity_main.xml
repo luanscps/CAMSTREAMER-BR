@@ -11,6 +11,13 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <!-- GRID OVERLAY (regra dos terços) — ativado com long-press no preview -->
+    <com.camera2rtsp.GridOverlayView
+        android:id="@+id/gridOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
     <!-- BARRA SUPERIOR: badge LIVE + URL RTMP + bateria -->
     <LinearLayout
         android:id="@+id/topBar"
