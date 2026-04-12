@@ -16,7 +16,6 @@ class Camera2Controller {
 
     private val tag = "Camera2Ctrl"
 
-    // Unica diferenca em relacao a v3: RtmpCamera2 em vez de RtspServerCamera2
     var rtmpCamera: RtmpCamera2? = null
     var appContext: Context? = null
 
@@ -45,82 +44,140 @@ class Camera2Controller {
     var noiseReductionMode = CameraMetadata.NOISE_REDUCTION_MODE_HIGH_QUALITY
     var hotPixelMode       = CameraMetadata.HOT_PIXEL_MODE_HIGH_QUALITY
 
+    // -------------------------------------------------------------------------
+    // Worker thread — todas as operações de câmera passam por aqui
+    // -------------------------------------------------------------------------
+
     private val workerThread = HandlerThread("CameraWorker").also { it.start() }
     private val worker = Handler(workerThread.looper)
     private fun post(block: () -> Unit) =
         worker.post { runCatching(block).onFailure { Log.e(tag, "worker error", it) } }
 
     // -------------------------------------------------------------------------
-    // Reflection helpers — identicos a v3, apenas ref muda para rtmpCamera
+    // Melhoria 1 + 2: Reflection com lazy cache e flag de validação
+    //
+    // Os campos e métodos refletidos são resolvidos UMA ÚNICA VEZ na primeira
+    // chamada (lazy). Se a lib RootEncoder mudar os nomes internos, o flag
+    // reflectionAvailable fica false e o app não crasha — apenas loga aviso.
     // -------------------------------------------------------------------------
 
-    private fun getCam2Manager(): Camera2ApiManager? = try {
-        val f = Camera2Base::class.java.getDeclaredField("cameraManager")
-        f.isAccessible = true
-        f.get(rtmpCamera) as? Camera2ApiManager
-    } catch (e: Exception) {
-        Log.e(tag, "getCam2Manager falhou", e); null
+    private val reflField_cameraManager: java.lang.reflect.Field? by lazy {
+        runCatching {
+            Camera2Base::class.java.getDeclaredField("cameraManager")
+                .also { it.isAccessible = true }
+        }.onFailure { Log.w(tag, "[reflection] campo 'cameraManager' não encontrado: ${it.message}") }
+         .getOrNull()
+    }
+
+    private val reflField_builderInputSurface: java.lang.reflect.Field? by lazy {
+        runCatching {
+            Camera2ApiManager::class.java.getDeclaredField("builderInputSurface")
+                .also { it.isAccessible = true }
+        }.onFailure { Log.w(tag, "[reflection] campo 'builderInputSurface' não encontrado: ${it.message}") }
+         .getOrNull()
+    }
+
+    private val reflMethod_applyRequest: java.lang.reflect.Method? by lazy {
+        runCatching {
+            Camera2ApiManager::class.java.getDeclaredMethod(
+                "applyRequest", CaptureRequest.Builder::class.java
+            ).also { it.isAccessible = true }
+        }.onFailure { Log.w(tag, "[reflection] método 'applyRequest' não encontrado: ${it.message}") }
+         .getOrNull()
+    }
+
+    // Flag calculado lazy: true somente se todos os três campos/métodos existem
+    val reflectionAvailable: Boolean by lazy {
+        val ok = reflField_cameraManager != null &&
+                 reflField_builderInputSurface != null &&
+                 reflMethod_applyRequest != null
+        if (ok) Log.i(tag, "[reflection] cache OK — lazy resolvido com sucesso")
+        else    Log.w(tag, "[reflection] INDISPONÍVEL — pós-processamento desativado")
+        ok
+    }
+
+    // -------------------------------------------------------------------------
+    // Helpers de reflection (usam cache, sem getDeclaredField repetido)
+    // -------------------------------------------------------------------------
+
+    private fun getCam2Manager(): Camera2ApiManager? {
+        if (!reflectionAvailable) return null
+        return runCatching {
+            reflField_cameraManager!!.get(rtmpCamera) as? Camera2ApiManager
+        }.onFailure { Log.e(tag, "getCam2Manager falhou", it) }.getOrNull()
     }
 
     private fun applyOnBuilder(block: (CaptureRequest.Builder) -> Unit): Boolean {
+        if (!reflectionAvailable) return false
         val cam = getCam2Manager() ?: return false
-        return try {
-            val bf = Camera2ApiManager::class.java.getDeclaredField("builderInputSurface")
-            bf.isAccessible = true
-            val builder = bf.get(cam) as? CaptureRequest.Builder
+        return runCatching {
+            val builder = reflField_builderInputSurface!!.get(cam) as? CaptureRequest.Builder
                 ?: run { Log.w(tag, "builderInputSurface nulo"); return false }
             block(builder)
-            val am = Camera2ApiManager::class.java.getDeclaredMethod(
-                "applyRequest", CaptureRequest.Builder::class.java
-            )
-            am.isAccessible = true
-            am.invoke(cam, builder) as? Boolean ?: false
-        } catch (e: Exception) {
-            Log.e(tag, "applyOnBuilder falhou", e); false
-        }
+            reflMethod_applyRequest!!.invoke(cam, builder) as? Boolean ?: false
+        }.onFailure { Log.e(tag, "applyOnBuilder falhou", it) }.getOrElse { false }
     }
 
     // -------------------------------------------------------------------------
-    // Post-processing
+    // Melhoria 3 + 4: applyPostProcessing com debounce no worker thread
+    //
+    // Se edgeMode, noiseReduction e hotPixel mudarem juntos (ex: preset),
+    // o builder é aplicado apenas UMA vez após 50ms, não três vezes.
     // -------------------------------------------------------------------------
 
-    private fun applyPostProcessing() {
+    private var postProcPending = false
+
+    private val postProcRunnable = Runnable {
+        postProcPending = false
         val ok = applyOnBuilder { b ->
             b.set(CaptureRequest.EDGE_MODE,            edgeMode)
             b.set(CaptureRequest.NOISE_REDUCTION_MODE, noiseReductionMode)
             b.set(CaptureRequest.HOT_PIXEL_MODE,       hotPixelMode)
             b.set(CaptureRequest.TONEMAP_MODE,         CameraMetadata.TONEMAP_MODE_HIGH_QUALITY)
         }
-        Log.d(tag, "postProcessing ok=$ok")
+        Log.d(tag, "postProcessing ok=$ok edge=$edgeMode nr=$noiseReductionMode hp=$hotPixelMode")
+    }
+
+    private fun schedulePostProcessing() {
+        if (!postProcPending) {
+            postProcPending = true
+            worker.postDelayed(postProcRunnable, 50)
+        }
+        // Se já estava pendente, apenas atualiza os valores — o Runnable usará
+        // os campos mais recentes quando executar (captura por referência)
     }
 
     // -------------------------------------------------------------------------
-    // Sensor manual / auto — logica identica a v3
+    // Sensor manual / auto — execução no worker thread
     // -------------------------------------------------------------------------
 
     private fun applyManualSensor() {
         val safeDuration = maxOf(frameDurationNs, exposureNs)
-        val ok = applyOnBuilder { b ->
-            b.set(CaptureRequest.CONTROL_MODE,          CameraMetadata.CONTROL_MODE_OFF)
-            b.set(CaptureRequest.CONTROL_AE_MODE,       CameraMetadata.CONTROL_AE_MODE_OFF)
-            b.set(CaptureRequest.SENSOR_SENSITIVITY,    isoValue)
-            b.set(CaptureRequest.SENSOR_EXPOSURE_TIME,  exposureNs)
-            b.set(CaptureRequest.SENSOR_FRAME_DURATION, safeDuration)
+        post {
+            val ok = applyOnBuilder { b ->
+                b.set(CaptureRequest.CONTROL_MODE,          CameraMetadata.CONTROL_MODE_OFF)
+                b.set(CaptureRequest.CONTROL_AE_MODE,       CameraMetadata.CONTROL_AE_MODE_OFF)
+                b.set(CaptureRequest.SENSOR_SENSITIVITY,    isoValue)
+                b.set(CaptureRequest.SENSOR_EXPOSURE_TIME,  exposureNs)
+                b.set(CaptureRequest.SENSOR_FRAME_DURATION, safeDuration)
+            }
+            Log.d(tag, "manualSensor ok=$ok ISO=$isoValue exp=${exposureNs}ns dur=${safeDuration}ns")
+            schedulePostProcessing()
         }
-        Log.d(tag, "manualSensor ok=$ok ISO=$isoValue exp=${exposureNs}ns dur=${safeDuration}ns")
-        applyPostProcessing()
     }
 
     private fun applyAutoSensor() {
-        val ok = applyOnBuilder { b ->
-            b.set(CaptureRequest.CONTROL_MODE,    CameraMetadata.CONTROL_MODE_AUTO)
-            b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON)
+        post {
+            val ok = applyOnBuilder { b ->
+                b.set(CaptureRequest.CONTROL_MODE,    CameraMetadata.CONTROL_MODE_AUTO)
+                b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON)
+            }
+            Log.d(tag, "autoSensor ok=$ok")
         }
-        Log.d(tag, "autoSensor ok=$ok")
     }
 
     // -------------------------------------------------------------------------
-    // updateSettings — logica identica a v3, srv -> rtmpCamera
+    // updateSettings
     // -------------------------------------------------------------------------
 
     fun updateSettings(params: Map<String, Any>) {
@@ -334,13 +391,16 @@ class Camera2Controller {
             }
         }
 
+        // Melhoria 3: edgeMode, noiseReduction e hotPixel usam schedulePostProcessing()
+        // para aplicar o builder UMA única vez mesmo quando os três mudam juntos
         params["edgeMode"]?.let {
             edgeMode = when (it as String) {
                 "off"  -> CameraMetadata.EDGE_MODE_OFF
                 "fast" -> CameraMetadata.EDGE_MODE_FAST
                 else   -> CameraMetadata.EDGE_MODE_HIGH_QUALITY
             }
-            applyPostProcessing(); Log.d(tag, "edgeMode -> $it")
+            schedulePostProcessing()
+            Log.d(tag, "edgeMode -> $it")
         }
 
         params["noiseReduction"]?.let {
@@ -350,7 +410,8 @@ class Camera2Controller {
                 "minimal" -> CameraMetadata.NOISE_REDUCTION_MODE_MINIMAL
                 else      -> CameraMetadata.NOISE_REDUCTION_MODE_HIGH_QUALITY
             }
-            applyPostProcessing(); Log.d(tag, "noiseReduction -> $it")
+            schedulePostProcessing()
+            Log.d(tag, "noiseReduction -> $it")
         }
 
         params["hotPixel"]?.let {
@@ -359,7 +420,8 @@ class Camera2Controller {
                 "fast" -> CameraMetadata.HOT_PIXEL_MODE_FAST
                 else   -> CameraMetadata.HOT_PIXEL_MODE_HIGH_QUALITY
             }
-            applyPostProcessing(); Log.d(tag, "hotPixel -> $it")
+            schedulePostProcessing()
+            Log.d(tag, "hotPixel -> $it")
         }
     }
 
@@ -379,6 +441,7 @@ class Camera2Controller {
     }
 
     fun release() {
+        worker.removeCallbacks(postProcRunnable)
         workerThread.quitSafely()
         rtmpCamera = null
     }
