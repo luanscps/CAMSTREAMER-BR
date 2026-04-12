@@ -46,11 +46,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var prefs: SharedPreferences
     private val prefFile   = "camera2rtmp_prefs"
     private val keyRtmpUrl = "rtmp_url"
-    private val defaultUrl = "rtmp://192.168.1.100:1935/live/stream"
+    // Fix 5: usa a constante centralizada no StreamingService
+    private val defaultUrl get() = StreamingService.DEFAULT_RTMP_URL
 
     // -- Estado --------------------------------------------------------------
     private var isPanelOpen = false
-    private var isStreaming = false
+    // Fix 1: isStreaming agora é computed property — lê diretamente do service
+    private val isStreaming: Boolean
+        get() = service?.rtmpStreamer?.isStreaming ?: false
 
     // -- HUD ticker ----------------------------------------------------------
     private val hudHandler  = Handler(Looper.getMainLooper())
@@ -167,13 +170,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupBottomActions() {
         btnShutter.setOnClickListener {
-            isStreaming = !isStreaming
-            if (isStreaming) service?.startStream()
-            else             service?.stopStream()
+            // Fix 1: lê estado real do service antes de decidir ação
+            if (isStreaming) {
+                service?.stopStream()
+            } else {
+                service?.startStream()
+            }
+            // Atualiza visual do botão imediatamente (o tickHud sincroniza em até 1s)
             btnShutter.setBackgroundResource(
-                if (isStreaming) R.drawable.bg_shutter_active else R.drawable.bg_shutter_inner
+                if (!isStreaming) R.drawable.bg_shutter_active else R.drawable.bg_shutter_inner
             )
-            showToast(if (isStreaming) "Transmitindo..." else "Stream parado")
+            showToast(if (!isStreaming) "Transmitindo..." else "Stream parado")
         }
         btnSettings.setOnClickListener { togglePanel() }
         btnClosePanel.setOnClickListener { closePanel() }
@@ -224,11 +231,26 @@ class MainActivity : AppCompatActivity() {
     // -- HUD ticker ----------------------------------------------------------
 
     private fun tickHud() {
-        val streaming = service?.rtmpStreamer?.isStreaming ?: false
+        val streaming = isStreaming
+
+        // Badge LIVE/OFF
         rtspBadge.text = if (streaming) "LIVE" else "OFF"
         rtspBadge.setBackgroundResource(
             if (streaming) R.drawable.bg_badge_red else R.drawable.bg_badge_green
         )
+        // Atualiza visual do botão shutter para refletir estado real
+        btnShutter.setBackgroundResource(
+            if (streaming) R.drawable.bg_shutter_active else R.drawable.bg_shutter_inner
+        )
+
+        // Fix 2: clientsBadge — mostra quantos browsers estão com o painel aberto
+        val clients = service?.httpServer?.let {
+            if (it.isAlive) it.connectedClients else 0
+        } ?: 0
+        clientsBadge.text = if (clients > 0) "🖥 $clients" else "🖥 0"
+        clientsBadge.alpha = if (clients > 0) 1f else 0.4f
+
+        // Bateria
         val bat = getBattery()
         batteryText.text = "$bat%"
         batteryText.setTextColor(when {
