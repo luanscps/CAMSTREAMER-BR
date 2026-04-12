@@ -16,9 +16,8 @@ dependencyResolutionManagement {
 
 rootProject.name = "Camera2RTSP"
 
-// RootEncoder como modulo local
-// Clone o repositorio em: C:\Users\Luan\StudioProjects\RootEncoder
-// Comando: git clone --branch 2.6.7 https://github.com/pedroSG94/RootEncoder.git C:\Users\Luan\StudioProjects\RootEncoder
+// RootEncoder como modulo local (tag 2.7.2)
+// Clone com: git clone --branch 2.7.2 --depth 1 https://github.com/pedroSG94/RootEncoder.git C:\Users\Luan\StudioProjects\RootEncoder
 includeBuild("../RootEncoder") {
     dependencySubstitution {
         substitute(module("com.github.pedroSG94.RootEncoder:library")).using(project(":library"))
