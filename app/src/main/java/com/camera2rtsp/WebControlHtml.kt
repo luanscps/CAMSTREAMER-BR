@@ -119,8 +119,6 @@ object WebControlHtml {
         sb.append("<div class=\"container\">")
         sb.append("<div class=\"header\"><h1>\uD83C\uDFA5 Camera2 RTMP Control</h1>")
         sb.append("<p>Camera2 API · RootEncoder · NanoHTTPD · v4-RTMP</p></div>")
-
-        // Status bar
         sb.append("<div class=\"statusbar\">")
         sb.append("<div class=\"badge\"><span class=\"dot off\" id=\"dot-stream\"></span><span id=\"lbl-stream\">Conectando...</span></div>")
         sb.append("<div class=\"badge\">Cam: <span id=\"lbl-cam\">-</span></div>")
@@ -129,16 +127,12 @@ object WebControlHtml {
         sb.append("<div class=\"badge\">Lat: <span id=\"lbl-lat\" class=\"lat-ok\">-</span></div>")
         sb.append("<div class=\"badge\" id=\"badge-manual\" style=\"display:none\">\uD83C\uDFAC Manual</div>")
         sb.append("</div>")
-
-        // RTMP URL card
         sb.append("<div class=\"card\"><h3>\uD83D\uDCE1 RTMP Stream</h3>")
         sb.append("<div class=\"info-row\"><div class=\"info-pill\">URL: <span id=\"info-rtmpurl\" style=\"word-break:break-all\">-</span></div></div>")
         sb.append("<div class=\"rtmp-row\">")
         sb.append("<input type=\"text\" id=\"rtmp-input\" placeholder=\"rtmp://servidor/live/chave\">")
         sb.append("<button onclick=\"applyRtmpUrl(this)\">Aplicar</button>")
         sb.append("</div></div>")
-
-        // Estado da Camera
         sb.append("<div class=\"card\"><h3>Estado da Camera</h3><div class=\"info-row\">")
         sb.append("<div class=\"info-pill\">Foco: <span id=\"info-focusmode\">-</span></div>")
         sb.append("<div class=\"info-pill\">Dist: <span id=\"info-focusdist\">-</span></div>")
@@ -155,12 +149,8 @@ object WebControlHtml {
         sb.append("<div class=\"info-pill\">NR: <span id=\"info-nr\">-</span></div>")
         sb.append("<div class=\"info-pill\">HotPx: <span id=\"info-hotpx\">-</span></div>")
         sb.append("</div></div>")
-
-        // Camera selector
         sb.append("<div class=\"card\" id=\"card-camera\"><h3>\uD83D\uDCF7 Camera</h3>")
         sb.append("<div class=\"btngroup\" id=\"btngroup-camera\">Carregando cameras...</div></div>")
-
-        // Resolucao + Bitrate
         sb.append("<div class=\"grid2\">")
         sb.append("<div class=\"card\"><h3>Resolucao</h3>")
         sb.append("<div class=\"btngroup\" id=\"btngroup-resolution\" style=\"margin-bottom:10px\"></div>")
@@ -175,8 +165,6 @@ object WebControlHtml {
         sb.append("<button onclick=\"setBitratePreset(8000)\">8M</button>")
         sb.append("<button onclick=\"setBitratePreset(20000)\">20M</button>")
         sb.append("</div></div></div>")
-
-        // Zoom
         sb.append("<div class=\"card\" id=\"card-zoom\"><h3>\uD83D\uDD0D Zoom <span class=\"val\" id=\"zoom-val\">1x</span></h3>")
         sb.append("<div class=\"slider-wrap\">")
         sb.append("<input type=\"range\" id=\"zoom\" min=\"0\" max=\"1\" value=\"0\" step=\"0.01\" oninput=\"updateZoom(this.value)\">")
@@ -187,8 +175,6 @@ object WebControlHtml {
         sb.append("<button onclick=\"setZoomPreset(0.5)\">4x</button>")
         sb.append("<button onclick=\"setZoomPreset(1.0)\">Max</button>")
         sb.append("</div></div>")
-
-        // Foco
         sb.append("<div class=\"card\" id=\"card-focus\"><h3>\uD83C\uDFAF Foco <span class=\"val\" id=\"focus-val\">Auto</span></h3>")
         sb.append("<div class=\"slider-wrap\">")
         sb.append("<input type=\"range\" id=\"focus\" min=\"0\" max=\"10\" value=\"0\" step=\"0.1\" oninput=\"updateFocus(this.value)\">")
@@ -196,8 +182,6 @@ object WebControlHtml {
         sb.append("<div class=\"btngroup\" style=\"margin-top:8px\" id=\"btngroup-focusmode\"></div>")
         sb.append("<button style=\"width:100%;margin-top:8px\" onclick=\"triggerAF(this)\">\uD83C\uDFAF Tocar para Focar</button>")
         sb.append("</div>")
-
-        // ISO + Sensor Manual
         sb.append("<div class=\"grid2\">")
         sb.append("<div class=\"card\" id=\"card-iso\"><h3>ISO <span class=\"val\" id=\"iso-val\">50</span></h3>")
         sb.append("<div class=\"slider-wrap\">")
@@ -207,8 +191,6 @@ object WebControlHtml {
         sb.append("<span class=\"toggle-label\">\uD83C\uDFAC Sensor Manual</span>")
         sb.append("<label class=\"switch\"><input type=\"checkbox\" id=\"toggle-manual\" onchange=\"toggleManual(this)\">")
         sb.append("<span class=\"sw\"></span></label></div></div>")
-
-        // EV
         sb.append("<div class=\"card\" id=\"card-ev\"><h3>EV <span class=\"val\" id=\"ev-val\">0</span></h3>")
         sb.append("<div class=\"slider-wrap\">")
         sb.append("<input type=\"range\" id=\"ev\" min=\"-8\" max=\"8\" value=\"0\" step=\"1\" oninput=\"updateEV(this.value)\">")
@@ -223,8 +205,6 @@ object WebControlHtml {
         sb.append("<span class=\"toggle-label\">\uD83D\uDD12 Travar AE</span>")
         sb.append("<label class=\"switch\"><input type=\"checkbox\" id=\"toggle-ae-lock\" onchange=\"toggleAELock(this)\">")
         sb.append("<span class=\"sw\"></span></label></div></div></div>")
-
-        // Shutter Speed
         sb.append("<div class=\"card hidden\" id=\"card-shutter\"><h3>\u23F1 Shutter <span class=\"val manual\" id=\"shutter-val\">1/50s</span></h3>")
         sb.append("<div class=\"slider-wrap\">")
         sb.append("<input type=\"range\" id=\"shutter\" class=\"manual-slider\" min=\"0\" max=\"10\" value=\"2\" step=\"1\" oninput=\"updateShutter(this.value)\">")
@@ -239,8 +219,6 @@ object WebControlHtml {
         sb.append("<button onclick=\"setShutterPreset('1/500')\">1/500</button>")
         sb.append("<button onclick=\"setShutterPreset('1/1000')\">1/1000</button>")
         sb.append("</div></div>")
-
-        // Frame Time
         sb.append("<div class=\"card hidden\" id=\"card-frame\"><h3>\uD83C\uDFAC Frame Time <span class=\"val manual\" id=\"frame-val\">1/30s</span></h3>")
         sb.append("<div class=\"slider-wrap\">")
         sb.append("<input type=\"range\" id=\"frame\" class=\"manual-slider\" min=\"0\" max=\"3\" value=\"1\" step=\"1\" oninput=\"updateFrameTime(this.value)\">")
@@ -253,16 +231,12 @@ object WebControlHtml {
         sb.append("</div>")
         sb.append("<p style=\"font-size:10px;color:var(--muted);margin-top:8px\">Frame Duration define o FPS maximo do sensor.</p>")
         sb.append("</div>")
-
-        // White Balance
         sb.append("<div class=\"card\" id=\"card-wb\"><h3>Balanco de Branco</h3>")
         sb.append("<div class=\"btngroup\" id=\"btngroup-wb\"></div>")
         sb.append("<div class=\"toggle-row\" style=\"margin-top:8px\">")
         sb.append("<span class=\"toggle-label\">\uD83D\uDD12 Travar AWB</span>")
         sb.append("<label class=\"switch\"><input type=\"checkbox\" id=\"toggle-awb-lock\" onchange=\"toggleAWBLock(this)\">")
         sb.append("<span class=\"sw\"></span></label></div></div>")
-
-        // Controles Extras
         sb.append("<div class=\"card\" id=\"card-extras\"><h3>Controles Extras</h3>")
         sb.append("<div id=\"extras-flash\"></div>")
         sb.append("<div class=\"toggle-row\" id=\"row-ois\">")
@@ -274,8 +248,6 @@ object WebControlHtml {
         sb.append("<label class=\"switch\"><input type=\"checkbox\" id=\"toggle-eis\" onchange=\"toggleEIS(this)\">")
         sb.append("<span class=\"sw\"></span></label></div>")
         sb.append("</div>")
-
-        // Processamento de Imagem
         sb.append("<div class=\"card hidden postproc-active\" id=\"card-postproc\">")
         sb.append("<h3>\uD83C\uDF9E Processamento de Imagem</h3>")
         sb.append("<div class=\"postproc-presets\">")
@@ -299,13 +271,10 @@ object WebControlHtml {
         sb.append("<button data-hotpx=\"high_quality\" onclick=\"setHotPx('high_quality',this)\" class=\"active\">Qualidade</button>")
         sb.append("</div></div>")
         sb.append("</div>")
-
         sb.append("<p style=\"text-align:center;margin-top:16px;color:var(--muted);font-size:10px;padding-bottom:20px\">")
         sb.append("Camera2 API · RootEncoder · NanoHTTPD · v4-RTMP</p>")
         sb.append("</div>")
         sb.append("<div id=\"toast\" class=\"ok\">OK</div>")
-
-        // JavaScript
         sb.append("<script>")
         sb.append("var ISO_LIST=[50,81,112,143,174,205,236,267,298,329,360,391,422,453,484,")
         sb.append("515,546,577,608,639,670,701,732,763,794,825,856,887,918,949,980,1011,1042,")
