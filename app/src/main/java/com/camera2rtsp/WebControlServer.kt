@@ -17,6 +17,9 @@ class WebControlServer(
     private val context: Context
 ) : NanoHTTPD(port) {
 
+    /** Número de clientes com o painel web aberto (atualizado pelo tickHud da MainActivity). */
+    var connectedClients: Int = 0
+
     override fun serve(session: IHTTPSession): Response {
         val uri = session.uri
         return when {
