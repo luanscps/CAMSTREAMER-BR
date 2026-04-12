@@ -26,12 +26,12 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     kotlinOptions {
-        jvmTarget = "1.8"
+        jvmTarget = "17"
     }
 }
 
@@ -40,7 +40,7 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")
 
-    // NanoHTTPD - servidor HTTP leve para WebControlServer
+    // NanoHTTPD
     implementation("org.nanohttpd:nanohttpd:2.3.1")
 
     // Gson
@@ -49,9 +49,7 @@ dependencies {
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
-    // RootEncoder — referencia direta ao commit SHA da tag 2.7.2
-    // Motivo: JitPack pode nao ter buildado a tag ainda; o hash sempre funciona.
-    // setCustomOnCaptureCompletedCallback foi adicionado na 2.6.7 (SHA: 6d45da3c3c)
-    // Hash da 2.7.2: 37c49033fba2e09d4ec441c2d1d6413d6aedc0a3 (primeiros 10 digitos usados)
-    implementation("com.github.pedroSG94.RootEncoder:library:37c49033fb")
+    // RootEncoder via modulo local (clonado em ../RootEncoder)
+    // INSTRUCOES: veja o README.md secao "Setup RootEncoder Local"
+    implementation(project(":library"))
 }

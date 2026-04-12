@@ -11,9 +11,18 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven { url 'https://jitpack.io' } // RootEncoder
     }
 }
 
 rootProject.name = "Camera2RTSP"
+
+// RootEncoder como modulo local
+// Clone o repositorio em: C:\Users\Luan\StudioProjects\RootEncoder
+// Comando: git clone --branch 2.6.7 https://github.com/pedroSG94/RootEncoder.git C:\Users\Luan\StudioProjects\RootEncoder
+includeBuild("../RootEncoder") {
+    dependencySubstitution {
+        substitute(module("com.github.pedroSG94.RootEncoder:library")).using(project(":library"))
+    }
+}
+
 include ':app'
