@@ -38,6 +38,20 @@ object WebControlApi {
         val focusDist = String.format(java.util.Locale.US, "%.2f", c.focusDistance)
         val numClients = if (streaming) 1 else 0
 
+        // ── Zoom óptico ───────────────────────────
+        // opticalZoomLevels = lista de focal lengths da câmera atual (ex: [4.3, 10.0, 23.5])
+        // opticalZoomIndex  = índice ativo (-1 = desativo / usando zoom digital)
+        val optZoomLabel: String = if (c.opticalZoomIndex >= 0 && c.opticalZoomIndex < c.opticalZoomLevels.size) {
+            String.format(java.util.Locale.US, "%.1fmm", c.opticalZoomLevels[c.opticalZoomIndex])
+        } else "digital"
+
+        // ── WB Manual RGGB ────────────────────────
+        val rggbStr = if (c.rggbEnabled) {
+            String.format(java.util.Locale.US,
+                "R=%.2f Gr=%.2f Gb=%.2f B=%.2f",
+                c.rggbGains[0], c.rggbGains[1], c.rggbGains[2], c.rggbGains[3])
+        } else "auto"
+
         val curvals = mapOf(
             "video_size"           to "${c.currentWidth}x${c.currentHeight}",
             "ffc"                  to if (c.currentCameraId == "1") "on" else "off",
@@ -63,7 +77,29 @@ object WebControlApi {
             "edge_mode"            to edgeModeStr(c.edgeMode),
             "noise_reduction_mode" to nrModeStr(c.noiseReductionMode),
             "tonemap_mode"         to "high_quality",
-            "hot_pixel_mode"       to hotPixelModeStr(c.hotPixelMode)
+            "hot_pixel_mode"       to hotPixelModeStr(c.hotPixelMode),
+            // ── NOVAS CHAVES ─────────────────────────────────────────────
+            // Zoom óptico
+            "optical_zoom"         to optZoomLabel,
+            "optical_zoom_index"   to c.opticalZoomIndex.toString(),
+            "optical_zoom_levels"  to c.opticalZoomLevels.joinToString(",") {
+                                         String.format(java.util.Locale.US, "%.1f", it) },
+            // WB Manual RGGB
+            "rggb_enabled"         to if (c.rggbEnabled) "on" else "off",
+            "rggb_gains"           to rggbStr,
+            "rggb_r"               to String.format(java.util.Locale.US, "%.2f", c.rggbGains[0]),
+            "rggb_gr"              to String.format(java.util.Locale.US, "%.2f", c.rggbGains[1]),
+            "rggb_gb"              to String.format(java.util.Locale.US, "%.2f", c.rggbGains[2]),
+            "rggb_b"               to String.format(java.util.Locale.US, "%.2f", c.rggbGains[3]),
+            // Monitor ao vivo (lidos dos @Volatile do TotalCaptureResult)
+            "live_iso"             to c.liveIso.toString(),
+            "live_exposure_ns"     to c.liveExposureNs.toString(),
+            "live_rggb_r"          to String.format(java.util.Locale.US, "%.3f", c.liveRggbR),
+            "live_rggb_gr"         to String.format(java.util.Locale.US, "%.3f", c.liveRggbGr),
+            "live_rggb_gb"         to String.format(java.util.Locale.US, "%.3f", c.liveRggbGb),
+            "live_rggb_b"          to String.format(java.util.Locale.US, "%.3f", c.liveRggbB),
+            "live_af_state"        to c.liveAfState,
+            "live_ae_state"        to c.liveAeState
         )
 
         val avail = mapOf(
