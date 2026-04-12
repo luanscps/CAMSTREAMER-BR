@@ -1,6 +1,7 @@
 package com.camera2rtsp
 
 import android.content.Context
+import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraMetadata
@@ -144,22 +145,23 @@ class Camera2Controller {
     }
 
     // -------------------------------------------------------------------------
-    // Monitor ao vivo — registra o callback no Camera2ApiManager via reflection
-    // Chamado uma vez após a câmera abrir (initLiveMonitor)
+    // Monitor ao vivo — registra o callback no Camera2ApiManager
+    // A API exige: (CameraCaptureSession, CaptureRequest, TotalCaptureResult) -> Unit
+    // RggbChannelVector não suporta operador [], usar .red/.greenEven/.greenOdd/.blue
     // -------------------------------------------------------------------------
 
     fun initLiveMonitor() {
         val cam2mgr = getCam2Manager() ?: return
         runCatching {
-            cam2mgr.setCustomOnCaptureCompletedCallback { result: TotalCaptureResult ->
+            cam2mgr.setCustomOnCaptureCompletedCallback { _: CameraCaptureSession, _: CaptureRequest, result: TotalCaptureResult ->
                 liveIso        = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: liveIso
                 liveExposureNs = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: liveExposureNs
                 val rggb = result.get(CaptureResult.COLOR_CORRECTION_GAINS)
                 if (rggb != null) {
-                    liveRggbR  = rggb[0]
-                    liveRggbGr = rggb[1]
-                    liveRggbGb = rggb[2]
-                    liveRggbB  = rggb[3]
+                    liveRggbR  = rggb.red
+                    liveRggbGr = rggb.greenEven
+                    liveRggbGb = rggb.greenOdd
+                    liveRggbB  = rggb.blue
                 }
                 liveAfState = when (result.get(CaptureResult.CONTROL_AF_STATE)) {
                     CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED      -> "focused"
@@ -170,11 +172,11 @@ class Camera2Controller {
                     else                                                -> "idle"
                 }
                 liveAeState = when (result.get(CaptureResult.CONTROL_AE_STATE)) {
-                    CaptureResult.CONTROL_AE_STATE_CONVERGED    -> "converged"
-                    CaptureResult.CONTROL_AE_STATE_SEARCHING    -> "searching"
-                    CaptureResult.CONTROL_AE_STATE_LOCKED       -> "locked"
+                    CaptureResult.CONTROL_AE_STATE_CONVERGED      -> "converged"
+                    CaptureResult.CONTROL_AE_STATE_SEARCHING      -> "searching"
+                    CaptureResult.CONTROL_AE_STATE_LOCKED         -> "locked"
                     CaptureResult.CONTROL_AE_STATE_FLASH_REQUIRED -> "flash_required"
-                    else                                         -> "idle"
+                    else                                           -> "idle"
                 }
             }
             Log.i(tag, "[liveMonitor] callback registrado com sucesso")
@@ -365,9 +367,6 @@ class Camera2Controller {
         }
 
         // ── WB Manual RGGB ────────────────────────────────────────────────────
-        // Parâmetros individuais: rggbR, rggbGr, rggbGb, rggbB  (Float 0.1–4.0)
-        // Parâmetro combinado:   rggbGains = [r, gr, gb, b]
-        // ─────────────────────────────────────────────────────────────────────
         var rggbDirty = false
 
         params["rggbR"]?.let {
@@ -398,7 +397,6 @@ class Camera2Controller {
         params["rggbReset"]?.let {
             rggbGains = floatArrayOf(1f, 1f, 1f, 1f)
             rggbEnabled = false
-            // Restaura AWB automático
             cam.enableAutoWhiteBalance(CameraMetadata.CONTROL_AWB_MODE_AUTO)
             whiteBalanceMode = "auto"
             Log.d(tag, "rggbReset")
@@ -413,14 +411,13 @@ class Camera2Controller {
                 else      -> it.toString().toFloatOrNull() ?: 0f
             }.coerceIn(0f, 1f)
             zoomLevel = z
-            opticalZoomIndex = -1  // ao usar zoom digital, cancela óptico ativo
+            opticalZoomIndex = -1
             val zr = cam.zoomRange
             cam.setZoom(zr.lower + z * (zr.upper - zr.lower))
             Log.d(tag, "zoom -> $z (real=${zr.lower + z * (zr.upper - zr.lower)})")
         }
 
         // ── Zoom Óptico ───────────────────────────────────────────────────────
-        // Parâmetro: opticalZoom = índice na lista opticalZoomLevels
         params["opticalZoom"]?.let { raw ->
             val idx = when (raw) {
                 is Double -> raw.toInt()
@@ -430,7 +427,6 @@ class Camera2Controller {
             if (idx >= 0 && idx < opticalZoomLevels.size) {
                 opticalZoomIndex = idx
                 applyOpticalZoom(opticalZoomLevels[idx])
-                // Reseta zoom digital ao 1x ao trocar lente óptica
                 zoomLevel = 0f
                 val zr = cam.zoomRange
                 cam.setZoom(zr.lower)
@@ -513,7 +509,6 @@ class Camera2Controller {
 
         params["camera"]?.let { value ->
             currentCameraId = value as String
-            // Ao trocar câmera, recalcula focal lengths disponíveis e reseta zoom óptico
             opticalZoomIndex = -1
             appContext?.let { ctx ->
                 val newCaps = discoverAllCameras(ctx).firstOrNull { it.cameraId == currentCameraId }
@@ -522,7 +517,7 @@ class Camera2Controller {
             }
             post {
                 cam.switchCamera(currentCameraId)
-                initLiveMonitor() // registra callback na nova câmera
+                initLiveMonitor()
                 if (manualSensor) applyManualSensor()
                 else if (!autoFocus && focusDistance > 0f) cam.setFocusDistance(focusDistance)
                 Log.d(tag, "camera -> $currentCameraId")
