@@ -41,21 +41,16 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnClosePanel: ImageButton
     private lateinit var editRtmpUrl: EditText
     private lateinit var btnApplyRtmpUrl: Button
-    private lateinit var gridOverlay: GridOverlayView
 
     // -- SharedPreferences ---------------------------------------------------
     private lateinit var prefs: SharedPreferences
-    private val prefFile       = "camera2rtmp_prefs"
-    private val keyRtmpUrl     = "rtmp_url"
-    private val defaultUrl     = "rtmp://192.168.1.100:1935/live/stream"
-    private val keyGridVisible = "grid_visible"
+    private val prefFile   = "camera2rtmp_prefs"
+    private val keyRtmpUrl = "rtmp_url"
+    private val defaultUrl = "rtmp://192.168.1.100:1935/live/stream"
 
     // -- Estado --------------------------------------------------------------
     private var isPanelOpen = false
-
-    /** Estado real lido direto do service - nunca mais dessincroniza. */
-    private val isStreaming: Boolean
-        get() = service?.rtmpStreamer?.isStreaming ?: false
+    private var isStreaming = false
 
     // -- HUD ticker ----------------------------------------------------------
     private val hudHandler  = Handler(Looper.getMainLooper())
@@ -73,7 +68,6 @@ class MainActivity : AppCompatActivity() {
             val b = binder as? StreamingService.LocalBinder ?: return
             service = b.getService()
             attachViewIfReady()
-            syncShutterButton()
         }
         override fun onServiceDisconnected(name: ComponentName?) {
             service = null
@@ -90,7 +84,6 @@ class MainActivity : AppCompatActivity() {
         bindViews()
         setupBottomActions()
         setupSettingsPanel()
-        setupGridOverlay()
         if (checkPermissions()) startAndBindService() else requestPermissions()
         hudHandler.post(hudRunnable)
     }
@@ -152,20 +145,19 @@ class MainActivity : AppCompatActivity() {
     // -- Bind views ----------------------------------------------------------
 
     private fun bindViews() {
-        cameraPreview   = findViewById(R.id.cameraPreview)
-        topBar          = findViewById(R.id.topBar)
-        statusText      = findViewById(R.id.statusText)
-        rtspBadge       = findViewById(R.id.rtspBadge)
-        clientsBadge    = findViewById(R.id.clientsBadge)
-        batteryText     = findViewById(R.id.batteryText)
-        bottomActions   = findViewById(R.id.bottomActions)
-        settingsPanel   = findViewById(R.id.settingsPanel)
-        btnShutter      = findViewById(R.id.btnShutter)
-        btnSettings     = findViewById(R.id.btnSettings)
-        btnClosePanel   = settingsPanel.findViewById(R.id.btnClosePanel)
-        editRtmpUrl     = settingsPanel.findViewById(R.id.editRtmpUrl)
+        cameraPreview  = findViewById(R.id.cameraPreview)
+        topBar         = findViewById(R.id.topBar)
+        statusText     = findViewById(R.id.statusText)
+        rtspBadge      = findViewById(R.id.rtspBadge)
+        clientsBadge   = findViewById(R.id.clientsBadge)
+        batteryText    = findViewById(R.id.batteryText)
+        bottomActions  = findViewById(R.id.bottomActions)
+        settingsPanel  = findViewById(R.id.settingsPanel)
+        btnShutter     = findViewById(R.id.btnShutter)
+        btnSettings    = findViewById(R.id.btnSettings)
+        btnClosePanel  = settingsPanel.findViewById(R.id.btnClosePanel)
+        editRtmpUrl    = settingsPanel.findViewById(R.id.editRtmpUrl)
         btnApplyRtmpUrl = settingsPanel.findViewById(R.id.btnApplyRtmpUrl)
-        gridOverlay     = findViewById(R.id.gridOverlay)
 
         val savedUrl = prefs.getString(keyRtmpUrl, defaultUrl) ?: defaultUrl
         editRtmpUrl.setText(savedUrl)
@@ -175,41 +167,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupBottomActions() {
         btnShutter.setOnClickListener {
-            if (isStreaming) {
-                service?.stopStream()
-                showToast("Stream parado")
-            } else {
-                service?.startStream()
-                showToast("Transmitindo...")
-            }
-            // Aguarda 200ms para o encoder atualizar antes de refletir no botao
-            hudHandler.postDelayed({ syncShutterButton() }, 200)
+            isStreaming = !isStreaming
+            if (isStreaming) service?.startStream()
+            else             service?.stopStream()
+            btnShutter.setBackgroundResource(
+                if (isStreaming) R.drawable.bg_shutter_active else R.drawable.bg_shutter_inner
+            )
+            showToast(if (isStreaming) "Transmitindo..." else "Stream parado")
         }
         btnSettings.setOnClickListener { togglePanel() }
         btnClosePanel.setOnClickListener { closePanel() }
-    }
-
-    /** Sincroniza o visual do botao shutter com o estado real do streamer. */
-    private fun syncShutterButton() {
-        btnShutter.setBackgroundResource(
-            if (isStreaming) R.drawable.bg_shutter_active else R.drawable.bg_shutter_inner
-        )
-    }
-
-    // -- Grid overlay --------------------------------------------------------
-
-    private fun setupGridOverlay() {
-        val visible = prefs.getBoolean(keyGridVisible, false)
-        gridOverlay.visibility = if (visible) View.VISIBLE else View.GONE
-
-        // Long-press no preview ativa/desativa grade e persiste a preferencia
-        cameraPreview.setOnLongClickListener {
-            val nowVisible = gridOverlay.visibility != View.VISIBLE
-            gridOverlay.visibility = if (nowVisible) View.VISIBLE else View.GONE
-            prefs.edit().putBoolean(keyGridVisible, nowVisible).apply()
-            showToast(if (nowVisible) "Grade ativada" else "Grade desativada")
-            true
-        }
     }
 
     // -- Settings panel ------------------------------------------------------
@@ -257,22 +224,11 @@ class MainActivity : AppCompatActivity() {
     // -- HUD ticker ----------------------------------------------------------
 
     private fun tickHud() {
-        val streaming = isStreaming
+        val streaming = service?.rtmpStreamer?.isStreaming ?: false
         rtspBadge.text = if (streaming) "LIVE" else "OFF"
         rtspBadge.setBackgroundResource(
             if (streaming) R.drawable.bg_badge_red else R.drawable.bg_badge_green
         )
-        syncShutterButton()
-
-        // clientsBadge: clientes conectados ao painel web (WebControlServer)
-        val clients = service?.httpServer?.connectedClients ?: 0
-        if (clients > 0) {
-            clientsBadge.visibility = View.VISIBLE
-            clientsBadge.text = "$clients CLI"
-        } else {
-            clientsBadge.visibility = View.GONE
-        }
-
         val bat = getBattery()
         batteryText.text = "$bat%"
         batteryText.setTextColor(when {
@@ -296,7 +252,7 @@ class MainActivity : AppCompatActivity() {
     private fun showToast(msg: String) =
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
 
-    // -- Permissoes ----------------------------------------------------------
+    // -- Permissões ----------------------------------------------------------
 
     private fun checkPermissions() =
         ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED &&
