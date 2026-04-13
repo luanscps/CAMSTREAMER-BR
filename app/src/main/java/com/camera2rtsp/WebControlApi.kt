@@ -31,26 +31,34 @@ object WebControlApi {
     // ─────────────────────────────────────────────
     // GET /api/status  ou  GET /status
     // ─────────────────────────────────────────────
-    fun serveStatus(cameraController: Camera2Controller): Response {
+    fun serveStatus(cameraController: Camera2Controller, context: Context): Response {
         val c = cameraController
         val streaming = c.rtmpCamera?.isStreaming == true
         val focusMode = if (c.autoFocus) "continuous-video" else "off"
         val focusDist = String.format(java.util.Locale.US, "%.2f", c.focusDistance)
         val numClients = if (streaming) 1 else 0
 
-        // ── Zoom óptico ───────────────────────────
-        // opticalZoomLevels = lista de focal lengths da câmera atual (ex: [4.3, 10.0, 23.5])
-        // opticalZoomIndex  = índice ativo (-1 = desativo / usando zoom digital)
+        // ── Zoom óptico ─────────────────────────────────────
         val optZoomLabel: String = if (c.opticalZoomIndex >= 0 && c.opticalZoomIndex < c.opticalZoomLevels.size) {
             String.format(java.util.Locale.US, "%.1fmm", c.opticalZoomLevels[c.opticalZoomIndex])
         } else "digital"
 
-        // ── WB Manual RGGB ────────────────────────
+        // ── WB Manual RGGB ──────────────────────────────────
         val rggbStr = if (c.rggbEnabled) {
             String.format(java.util.Locale.US,
                 "R=%.2f Gr=%.2f Gb=%.2f B=%.2f",
                 c.rggbGains[0], c.rggbGains[1], c.rggbGains[2], c.rggbGains[3])
         } else "auto"
+
+        // ── focus_distance_calibration da câmera ativa ──────────────
+        // Lido em tempo real das CameraCharacteristics para refletir troca de câmera
+        val focusCalibration = try {
+            val activeCaps = c.discoverAllCameras(context)
+                .firstOrNull { it.cameraId == c.currentCameraId }
+            activeCaps?.focusDistanceCalibration ?: "UNCALIBRATED"
+        } catch (e: Exception) {
+            "UNCALIBRATED"
+        }
 
         val curvals = mapOf(
             "video_size"           to "${c.currentWidth}x${c.currentHeight}",
@@ -78,20 +86,19 @@ object WebControlApi {
             "noise_reduction_mode" to nrModeStr(c.noiseReductionMode),
             "tonemap_mode"         to "high_quality",
             "hot_pixel_mode"       to hotPixelModeStr(c.hotPixelMode),
-            // ── NOVAS CHAVES ─────────────────────────────────────────────
-            // Zoom óptico
+            // ── Zoom óptico ─────────────────────────────────────────────
             "optical_zoom"         to optZoomLabel,
             "optical_zoom_index"   to c.opticalZoomIndex.toString(),
             "optical_zoom_levels"  to c.opticalZoomLevels.joinToString(",") {
                                          String.format(java.util.Locale.US, "%.1f", it) },
-            // WB Manual RGGB
+            // ── WB Manual RGGB ─────────────────────────────────────────
             "rggb_enabled"         to if (c.rggbEnabled) "on" else "off",
             "rggb_gains"           to rggbStr,
             "rggb_r"               to String.format(java.util.Locale.US, "%.2f", c.rggbGains[0]),
             "rggb_gr"              to String.format(java.util.Locale.US, "%.2f", c.rggbGains[1]),
             "rggb_gb"              to String.format(java.util.Locale.US, "%.2f", c.rggbGains[2]),
             "rggb_b"               to String.format(java.util.Locale.US, "%.2f", c.rggbGains[3]),
-            // Monitor ao vivo (lidos dos @Volatile do TotalCaptureResult)
+            // ── Monitor ao vivo ─────────────────────────────────────────
             "live_iso"             to c.liveIso.toString(),
             "live_exposure_ns"     to c.liveExposureNs.toString(),
             "live_rggb_r"          to String.format(java.util.Locale.US, "%.3f", c.liveRggbR),
@@ -99,7 +106,10 @@ object WebControlApi {
             "live_rggb_gb"         to String.format(java.util.Locale.US, "%.3f", c.liveRggbGb),
             "live_rggb_b"          to String.format(java.util.Locale.US, "%.3f", c.liveRggbB),
             "live_af_state"        to c.liveAfState,
-            "live_ae_state"        to c.liveAeState
+            "live_ae_state"        to c.liveAeState,
+            // ── NOVO: Calibração de foco da câmera ativa ────────────────
+            // UNCALIBRATED | APPROXIMATE | CALIBRATED
+            "focus_distance_calibration" to focusCalibration
         )
 
         val avail = mapOf(
