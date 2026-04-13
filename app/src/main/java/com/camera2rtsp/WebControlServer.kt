@@ -9,7 +9,7 @@ import fi.iki.elonen.NanoHTTPD
  *
  * Delega:
  *   - Lógica de negócio JSON  → WebControlApi
- *   - Geração do painel HTML  → WebControlHtml
+ *   - Geração do painel HTML  → WebControlHtml (lê assets/webui/)
  */
 class WebControlServer(
     port: Int,
@@ -24,6 +24,8 @@ class WebControlServer(
         val uri = session.uri
         return when {
             uri == "/"                 -> serveControlPanel()
+            uri == "/style.css"        -> serveAsset("style.css",  "text/css")
+            uri == "/app.js"           -> serveAsset("app.js",     "application/javascript")
             uri == "/status"           -> WebControlApi.serveStatus(cameraController, context)
             uri == "/api/status"       -> WebControlApi.serveStatus(cameraController, context)
             uri == "/api/capabilities" -> WebControlApi.serveCapabilities(cameraController, context)
@@ -34,5 +36,12 @@ class WebControlServer(
     }
 
     private fun serveControlPanel(): Response =
-        newFixedLengthResponse(Response.Status.OK, "text/html", WebControlHtml.build())
+        newFixedLengthResponse(Response.Status.OK, "text/html", WebControlHtml.build(context))
+
+    private fun serveAsset(filename: String, mimeType: String): Response =
+        newFixedLengthResponse(
+            Response.Status.OK,
+            mimeType,
+            WebControlHtml.serveAsset(context, filename)
+        )
 }
