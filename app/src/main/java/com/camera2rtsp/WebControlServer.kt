@@ -24,8 +24,8 @@ class WebControlServer(
         val uri = session.uri
         return when {
             uri == "/"                 -> serveControlPanel()
-            uri == "/status"           -> WebControlApi.serveStatus(cameraController)
-            uri == "/api/status"       -> WebControlApi.serveStatus(cameraController)
+            uri == "/status"           -> WebControlApi.serveStatus(cameraController, context)
+            uri == "/api/status"       -> WebControlApi.serveStatus(cameraController, context)
             uri == "/api/capabilities" -> WebControlApi.serveCapabilities(cameraController, context)
             uri == "/api/control" && session.method == Method.POST
                                        -> WebControlApi.handleControl(session, cameraController)
