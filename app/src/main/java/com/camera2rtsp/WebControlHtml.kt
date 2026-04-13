@@ -4,6 +4,12 @@ package com.camera2rtsp
  * WebControlHtml
  * Gera o HTML completo do painel de controle remoto (v4-UI).
  * Chamado por WebControlServer ao servir GET /
+ *
+ * Melhorias de debounce (v4-debounce-fix):
+ *  1. Zoom 150ms → 250ms  (menos requests, zoom mais estável)
+ *  2. RGGB com timer por canal (_rgT_R, _rgT_Gr, _rgT_Gb, _rgT_B)
+ *  3. Poll 2000ms → 1000ms (feedback visual mais rápido)
+ *  4. updateManualUI no poll protegido: só executa se o valor realmente mudou
  */
 object WebControlHtml {
 
@@ -417,7 +423,9 @@ object WebControlHtml {
         sb.append("var FRAME_STOPS=['1/15','1/24','1/30','1/60'];")
         sb.append("var _caps=null;var _currentCamId='0';var _isManual=false;var _rggbEnabled=false;")
         sb.append("var _toastTimer;var _pollFail=0;")
-        sb.append("var _brT,_zT,_fT,_iT,_eT,_shT,_frT,_rgT;")
+        // FIX 1: zoom 250ms | FIX 2: RGGB timer por canal | outros sem mudança
+        sb.append("var _brT,_zT,_fT,_iT,_eT,_shT,_frT;")
+        sb.append("var _rgT_R,_rgT_Gr,_rgT_Gb,_rgT_B;")
         // Toast + feedback
         sb.append("function showToast(msg,isErr){var t=document.getElementById('toast');")
         sb.append("t.textContent=msg;t.className=isErr?'err':'ok';t.classList.add('show');")
@@ -441,8 +449,10 @@ object WebControlHtml {
         sb.append("function streamAction(action,btn){")
         sb.append("var msgs={start:'Stream iniciado',restart:'Stream reiniciado',stop:'Stream parado'};")
         sb.append("sendControl({streamAction:action},btn,msgs[action]||action);}")
-        // Manual UI
-        sb.append("function updateManualUI(isManual){_isManual=isManual;")
+        // FIX 4: updateManualUI protegido — só executa se o valor realmente mudou
+        sb.append("function updateManualUI(isManual){")
+        sb.append("if(_isManual===isManual)return;")
+        sb.append("_isManual=isManual;")
         sb.append("var badge=document.getElementById('badge-manual');")
         sb.append("if(badge)badge.style.display=isManual?'flex':'none';")
         sb.append("['card-iso','card-shutter','card-frame'].forEach(function(id){")
@@ -467,18 +477,21 @@ object WebControlHtml {
         sb.append("sendControl({edgeMode:'high_quality',noiseReduction:'high_quality',hotPixel:'high_quality'},btn,'Qualidade Maxima');}")
         sb.append("function applyLatencyMin(btn){markActive('data-edge','off');markActive('data-nr','off');markActive('data-hotpx','off');")
         sb.append("sendControl({edgeMode:'off',noiseReduction:'off',hotPixel:'off'},btn,'Latencia Minima');}")
-        // ── RGGB ─────────────────────────────────────────────────────────
+        // ── RGGB — FIX 2: timer independente por canal ───────────────────
         sb.append("var _rggbR=1.0,_rggbGr=1.0,_rggbGb=1.0,_rggbB=1.0;")
+        sb.append("function _rggbSendAll(){sendControl({rggbR:_rggbR,rggbGr:_rggbGr,rggbGb:_rggbGb,rggbB:_rggbB},null,'RGGB aplicado');}")
         sb.append("function updateRggb(ch,raw){var v=parseInt(raw,10)/100;")
-        sb.append("if(ch==='R'){_rggbR=v;var n=document.getElementById('rggb-r-num');if(n)n.textContent=v.toFixed(2);}")
-        sb.append("else if(ch==='Gr'){_rggbGr=v;var n=document.getElementById('rggb-gr-num');if(n)n.textContent=v.toFixed(2);}")
-        sb.append("else if(ch==='Gb'){_rggbGb=v;var n=document.getElementById('rggb-gb-num');if(n)n.textContent=v.toFixed(2);}")
-        sb.append("else if(ch==='B'){_rggbB=v;var n=document.getElementById('rggb-b-num');if(n)n.textContent=v.toFixed(2);}")
+        sb.append("if(ch==='R'){_rggbR=v;var n=document.getElementById('rggb-r-num');if(n)n.textContent=v.toFixed(2);")
+        sb.append("clearTimeout(_rgT_R);_rgT_R=setTimeout(_rggbSendAll,300);}")
+        sb.append("else if(ch==='Gr'){_rggbGr=v;var n=document.getElementById('rggb-gr-num');if(n)n.textContent=v.toFixed(2);")
+        sb.append("clearTimeout(_rgT_Gr);_rgT_Gr=setTimeout(_rggbSendAll,300);}")
+        sb.append("else if(ch==='Gb'){_rggbGb=v;var n=document.getElementById('rggb-gb-num');if(n)n.textContent=v.toFixed(2);")
+        sb.append("clearTimeout(_rgT_Gb);_rgT_Gb=setTimeout(_rggbSendAll,300);}")
+        sb.append("else if(ch==='B'){_rggbB=v;var n=document.getElementById('rggb-b-num');if(n)n.textContent=v.toFixed(2);")
+        sb.append("clearTimeout(_rgT_B);_rgT_B=setTimeout(_rggbSendAll,300);}")
         sb.append("_rggbEnabled=true;document.getElementById('card-rggb').classList.add('rggb-active');")
         sb.append("var badge=document.getElementById('badge-rggb');if(badge)badge.style.display='flex';")
-        sb.append("var st=document.getElementById('rggb-status');if(st)st.textContent='Ativo';")
-        sb.append("clearTimeout(_rgT);_rgT=setTimeout(function(){")
-        sb.append("sendControl({rggbR:_rggbR,rggbGr:_rggbGr,rggbGb:_rggbGb,rggbB:_rggbB},null,'RGGB aplicado');},300);}")
+        sb.append("var st=document.getElementById('rggb-status');if(st)st.textContent='Ativo';}")
         sb.append("function applyRggbPreset(r,gr,gb,b){")
         sb.append("_rggbR=r;_rggbGr=gr;_rggbGb=gb;_rggbB=b;")
         sb.append("function setSlider(id,numId,v){var sl=document.getElementById(id);if(sl)sl.value=Math.round(v*100);")
@@ -567,9 +580,10 @@ object WebControlHtml {
         sb.append("clearTimeout(_brT);_brT=setTimeout(function(){sendControl({bitrate:+v},null,v+'kbps');},400);}")
         sb.append("function setBitratePreset(v){document.getElementById('bitrate').value=v;")
         sb.append("document.getElementById('br-value').textContent=v;sendControl({bitrate:v},null,v+'kbps');}")
+        // FIX 1: zoom debounce 150ms → 250ms
         sb.append("function updateZoom(v){var pct=parseFloat(v);var mult=(1+pct*7).toFixed(1);")
         sb.append("document.getElementById('zoom-val').textContent=mult+'x';")
-        sb.append("clearTimeout(_zT);_zT=setTimeout(function(){sendControl({zoom:pct},null,'Zoom '+mult+'x');},150);}")
+        sb.append("clearTimeout(_zT);_zT=setTimeout(function(){sendControl({zoom:pct},null,'Zoom '+mult+'x');},250);}")
         sb.append("function setZoomPreset(v){document.getElementById('zoom').value=v;updateZoom(v);}")
         sb.append("function updateFocus(v){var f=parseFloat(v);")
         sb.append("document.getElementById('focus-val').textContent=f===0?'Auto':f.toFixed(1)+'D';")
@@ -607,7 +621,7 @@ object WebControlHtml {
         // Monitor ao vivo helpers
         sb.append("function afClass(s){return s==='focused'||s==='passive_focused'?'green':s==='scanning'||s==='passive_scan'?'yellow':''}")
         sb.append("function aeClass(s){return s==='converged'?'green':s==='searching'?'yellow':s==='locked'?'green':''}")
-        // pollStatus
+        // FIX 3: pollStatus — intervalo 2000ms → 1000ms (definido no setInterval abaixo)
         sb.append("function pollStatus(){var t0=Date.now();fetch('/api/status')")
         sb.append(".then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})")
         sb.append(".then(function(d){var lat=Date.now()-t0;var c=d.curvals||{};_pollFail=0;")
@@ -623,6 +637,7 @@ object WebControlHtml {
         sb.append("if(rtmpSpan)rtmpSpan.textContent=d.rtmp_url||'-';")
         sb.append("if(d.rtmp_url){var inp=document.getElementById('rtmp-input');")
         sb.append("if(inp&&document.activeElement!==inp)inp.value=d.rtmp_url;}")
+        // FIX 4: guard — só chama updateManualUI se o valor mudou (a função em si já tem o guard interno)
         sb.append("var isManual=c.manual_sensor==='on';")
         sb.append("updateManualUI(isManual);")
         sb.append("syncChk('toggle-ois',c.ois==='on');")
@@ -698,7 +713,8 @@ object WebControlHtml {
         sb.append("b.onclick=function(){setFPS(fps,b);};fg.appendChild(b);});")
         sb.append("updateUIForCamera(fc.camera_id);}")
         sb.append("}).catch(function(e){console.warn('caps error',e);})}")
-        sb.append("initCapabilities();pollStatus();setInterval(pollStatus,2000);")
+        // FIX 3: poll a cada 1000ms (era 2000ms)
+        sb.append("initCapabilities();pollStatus();setInterval(pollStatus,1000);")
         sb.append("</script></body></html>")
         return sb.toString()
     }
