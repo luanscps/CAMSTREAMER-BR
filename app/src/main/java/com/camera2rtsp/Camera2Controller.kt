@@ -85,7 +85,10 @@ class Camera2Controller {
         worker.post { runCatching(block).onFailure { Log.e(tag, "worker error", it) } }
 
     // -------------------------------------------------------------------------
-    // Melhoria 1 + 2: Reflection com lazy cache e flag de validação
+    // FIX 1: Reflection — lazy cache apenas para os campos que NÃO mudam entre
+    // sessões (os java.lang.reflect.Field/Method do bytecode são estáticos).
+    // O builderInputSurface em si muda a cada nova sessão de câmera, por isso
+    // ele NÃO pode ser cacheado — deve ser lido a cada chamada de applyOnBuilder.
     // -------------------------------------------------------------------------
 
     private val reflField_cameraManager: java.lang.reflect.Field? by lazy {
@@ -96,6 +99,9 @@ class Camera2Controller {
          .getOrNull()
     }
 
+    // FIX 1: NÃO usa lazy — o campo Field é resolvido uma vez (ok) mas o
+    // *valor* (builderInputSurface) muda a cada sessão, então guardamos apenas
+    // o Field e lemos o valor dinamicamente em applyOnBuilder.
     private val reflField_builderInputSurface: java.lang.reflect.Field? by lazy {
         runCatching {
             Camera2ApiManager::class.java.getDeclaredField("builderInputSurface")
@@ -133,10 +139,16 @@ class Camera2Controller {
         }.onFailure { Log.e(tag, "getCam2Manager falhou", it) }.getOrNull()
     }
 
+    // FIX 1 (core): lê o builderInputSurface a CADA chamada — nunca cacheia o valor,
+    // apenas o Field. Isso garante que após troca de câmera o builder correto é usado.
     private fun applyOnBuilder(block: (CaptureRequest.Builder) -> Unit): Boolean {
         if (!reflectionAvailable) return false
-        val cam = getCam2Manager() ?: return false
+        val cam = getCam2Manager() ?: run {
+            Log.w(tag, "applyOnBuilder: getCam2Manager nulo")
+            return false
+        }
         return runCatching {
+            // Lê o builder fresco a cada invocação — não usa cache
             val builder = reflField_builderInputSurface!!.get(cam) as? CaptureRequest.Builder
                 ?: run { Log.w(tag, "builderInputSurface nulo"); return false }
             block(builder)
@@ -145,13 +157,19 @@ class Camera2Controller {
     }
 
     // -------------------------------------------------------------------------
-    // Monitor ao vivo — registra o callback no Camera2ApiManager
-    // A API exige: (CameraCaptureSession, CaptureRequest, TotalCaptureResult) -> Unit
-    // RggbChannelVector não suporta operador [], usar .red/.greenEven/.greenOdd/.blue
+    // FIX 2 + 3: Monitor ao vivo — registra o callback no Camera2ApiManager.
+    // Usa postDelayed(300ms) para garantir que a nova sessão de câmera já está
+    // aberta antes de tentar registrar o callback.
+    // Chamado em:
+    //   • initLiveMonitorDelayed()  — pós troca de câmera (delay 300ms)
+    //   • onStreamStarted()         — quando o stream inicia (delay 500ms)
     // -------------------------------------------------------------------------
 
     fun initLiveMonitor() {
-        val cam2mgr = getCam2Manager() ?: return
+        val cam2mgr = getCam2Manager() ?: run {
+            Log.w(tag, "[liveMonitor] getCam2Manager nulo — abortando")
+            return
+        }
         runCatching {
             cam2mgr.setCustomOnCaptureCompletedCallback { _: CameraCaptureSession, _: CaptureRequest, result: TotalCaptureResult ->
                 liveIso        = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: liveIso
@@ -181,6 +199,18 @@ class Camera2Controller {
             }
             Log.i(tag, "[liveMonitor] callback registrado com sucesso")
         }.onFailure { Log.w(tag, "[liveMonitor] setCustomOnCaptureCompletedCallback falhou: ${it.message}") }
+    }
+
+    // FIX 2: delay de 300ms após troca de câmera para aguardar nova sessão
+    fun initLiveMonitorDelayed(delayMs: Long = 300L) {
+        worker.postDelayed({ initLiveMonitor() }, delayMs)
+    }
+
+    // FIX 3: chamado pelo RtmpStreamer após startStream com delay maior (500ms)
+    // pois o encoder precisa de um pouco mais de tempo para abrir a sessão
+    fun onStreamStarted() {
+        worker.postDelayed({ initLiveMonitor() }, 500L)
+        Log.i(tag, "[liveMonitor] onStreamStarted agendado (500ms)")
     }
 
     // -------------------------------------------------------------------------
@@ -517,7 +547,8 @@ class Camera2Controller {
             }
             post {
                 cam.switchCamera(currentCameraId)
-                initLiveMonitor()
+                // FIX 2: usa delay para aguardar a nova sessão abrir antes de registrar callback
+                initLiveMonitorDelayed(300L)
                 if (manualSensor) applyManualSensor()
                 else if (!autoFocus && focusDistance > 0f) cam.setFocusDistance(focusDistance)
                 Log.d(tag, "camera -> $currentCameraId")
