@@ -731,6 +731,55 @@ class Camera2Controller {
                     else -> "unknown"
                 }
             } ?: emptyList()
+
+            // ── NOVO: Scene Modes ─────────────────────────────────────────
+            val sceneModes = ch.get(CameraCharacteristics.CONTROL_AVAILABLE_SCENE_MODES)?.map {
+                when (it) {
+                    CameraMetadata.CONTROL_SCENE_MODE_DISABLED        -> "disabled"
+                    CameraMetadata.CONTROL_SCENE_MODE_ACTION          -> "action"
+                    CameraMetadata.CONTROL_SCENE_MODE_PORTRAIT        -> "portrait"
+                    CameraMetadata.CONTROL_SCENE_MODE_LANDSCAPE       -> "landscape"
+                    CameraMetadata.CONTROL_SCENE_MODE_NIGHT           -> "night"
+                    CameraMetadata.CONTROL_SCENE_MODE_NIGHT_PORTRAIT  -> "night_portrait"
+                    CameraMetadata.CONTROL_SCENE_MODE_THEATRE         -> "theatre"
+                    CameraMetadata.CONTROL_SCENE_MODE_BEACH           -> "beach"
+                    CameraMetadata.CONTROL_SCENE_MODE_SNOW            -> "snow"
+                    CameraMetadata.CONTROL_SCENE_MODE_SUNSET          -> "sunset"
+                    CameraMetadata.CONTROL_SCENE_MODE_STEADYPHOTO     -> "steadyphoto"
+                    CameraMetadata.CONTROL_SCENE_MODE_FIREWORKS       -> "fireworks"
+                    CameraMetadata.CONTROL_SCENE_MODE_SPORTS          -> "sports"
+                    CameraMetadata.CONTROL_SCENE_MODE_PARTY           -> "party"
+                    CameraMetadata.CONTROL_SCENE_MODE_CANDLELIGHT     -> "candlelight"
+                    CameraMetadata.CONTROL_SCENE_MODE_BARCODE         -> "barcode"
+                    CameraMetadata.CONTROL_SCENE_MODE_HIGH_SPEED_VIDEO -> "high_speed_video"
+                    CameraMetadata.CONTROL_SCENE_MODE_HDR             -> "hdr"
+                    else -> "unknown_$it"
+                }
+            }?.filter { it != "disabled" } ?: emptyList()
+
+            // ── NOVO: Effect Modes ────────────────────────────────────────
+            val effectModes = ch.get(CameraCharacteristics.CONTROL_AVAILABLE_EFFECTS)?.map {
+                when (it) {
+                    CameraMetadata.CONTROL_EFFECT_MODE_OFF      -> "off"
+                    CameraMetadata.CONTROL_EFFECT_MODE_MONO     -> "mono"
+                    CameraMetadata.CONTROL_EFFECT_MODE_NEGATIVE -> "negative"
+                    CameraMetadata.CONTROL_EFFECT_MODE_SOLARIZE -> "solarize"
+                    CameraMetadata.CONTROL_EFFECT_MODE_SEPIA    -> "sepia"
+                    CameraMetadata.CONTROL_EFFECT_MODE_POSTERIZE -> "posterize"
+                    CameraMetadata.CONTROL_EFFECT_MODE_WHITEBOARD -> "whiteboard"
+                    CameraMetadata.CONTROL_EFFECT_MODE_BLACKBOARD -> "blackboard"
+                    CameraMetadata.CONTROL_EFFECT_MODE_AQUA     -> "aqua"
+                    else -> "unknown_$it"
+                }
+            }?.filter { it != "off" } ?: emptyList()
+
+            // ── NOVO: Focus Distance Calibration ─────────────────────────
+            val focusCalibration = when (ch.get(CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION)) {
+                CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION_CALIBRATED   -> "CALIBRATED"
+                CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION_APPROXIMATE  -> "APPROXIMATE"
+                else                                                                     -> "UNCALIBRATED"
+            }
+
             val hasFlash = ch.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
             val hasOis   = ch.get(CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION)
                 ?.contains(CameraCharacteristics.LENS_OPTICAL_STABILIZATION_MODE_ON) ?: false
@@ -762,8 +811,12 @@ class Camera2Controller {
                 focusDistanceRange = focRange, zoomRange = zomRange,
                 fpsRanges = fpsRanges, availableResolutions = resolutions,
                 supportedAfModes = afModes, supportedAeModes = aeModes,
-                supportedAwbModes = awbModes, hasFlash = hasFlash, hasOis = hasOis,
-                focalLengths = focalLengths, apertures = apertures
+                supportedAwbModes = awbModes,
+                supportedSceneModes = sceneModes,
+                supportedEffectModes = effectModes,
+                hasFlash = hasFlash, hasOis = hasOis,
+                focalLengths = focalLengths, apertures = apertures,
+                focusDistanceCalibration = focusCalibration
             ))
         }
         return cameras
