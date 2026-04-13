@@ -74,7 +74,6 @@ class RtmpStreamer(
     fun switchCamera(facing: CameraHelper.Facing) {
         val cam = camera ?: return
         try {
-            val wasStreaming = cam.isStreaming
             if (cam.isOnPreview) cam.stopPreview()
             cam.startPreview(facing)
             Log.i(tag, "Camera trocada para $facing")
@@ -112,6 +111,8 @@ class RtmpStreamer(
         val aOk = cam.prepareAudio(128 * 1024, 44100, true)
         if (vOk && aOk) {
             cam.startStream(url)
+            // FIX 3: registra o liveMonitor apos o encoder abrir a sessao (500ms)
+            ctrl.onStreamStarted()
             Log.i(tag, "RTMP iniciado: $url")
         } else {
             Log.e(tag, "Falha ao preparar encoder: vOk=$vOk aOk=$aOk")
