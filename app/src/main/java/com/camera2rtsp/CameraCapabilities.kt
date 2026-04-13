@@ -35,10 +35,8 @@ data class CameraCapabilities(
     val supportedAeModes: List<String>,
     val supportedAwbModes: List<String>,
 
-    // ── NOVOS: Scene Modes e Effect Modes ─────────────────────────────────
-    // Lista de modos de cena disponíveis no hardware (ex: "night", "action", "portrait")
+    // Scene Modes e Effect Modes
     val supportedSceneModes: List<String>,
-    // Lista de efeitos de cor disponíveis (ex: "mono", "sepia", "negative")
     val supportedEffectModes: List<String>,
 
     // Hardware físico
@@ -47,8 +45,29 @@ data class CameraCapabilities(
     val focalLengths: List<Float>,
     val apertures: List<Float>,
 
-    // ── NOVO: Calibração do foco ───────────────────────────────────────────
-    // "UNCALIBRATED" | "APPROXIMATE" | "CALIBRATED"
-    // Afeta como os valores do slider de foco devem ser interpretados
-    val focusDistanceCalibration: String
+    // Calibração do foco
+    val focusDistanceCalibration: String, // "UNCALIBRATED" | "APPROXIMATE" | "CALIBRATED"
+
+    // ── NOVOS: Informações extras do sensor e hardware ─────────────────────
+
+    // Tamanho do array de pixels físico (ex: [4000, 3000] = 12MP)
+    val sensorPixelArraySize: List<Int>?,
+
+    // Tamanho físico do sensor em milímetros [width_mm, height_mm]
+    val sensorPhysicalSize: List<Float>?,
+
+    // Distância mínima de foco em diopters (1/metros). null = AF fixo ou infinito
+    // LENS_INFO_MINIMUM_FOCUS_DISTANCE
+    val lensMinFocusDistance: Float?,
+
+    // Tipo de cropping suportado pelo scaler para zoom digital
+    // "CENTER_ONLY" = apenas crop central | "FREEFORM" = qualquer região
+    val scalerCroppingType: String,
+
+    // Número máximo de regiões AF/AE simultâneas suportadas pelo hardware
+    val maxRegionsAf: Int,
+    val maxRegionsAe: Int,
+
+    // Detecção de face: 0 = não suporta, >0 = número máximo de faces
+    val maxFaceCount: Int
 )

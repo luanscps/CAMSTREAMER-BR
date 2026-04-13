@@ -1,10 +1,12 @@
 package com.camera2rtsp
 
 import android.content.Context
+import android.graphics.SizeF
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraMetadata
 import android.util.Log
+import android.util.Size
 
 /**
  * Le as capabilities reais da camera via Camera2 API e preenche
@@ -109,6 +111,33 @@ object CameraCapabilitiesReader {
                 ?.sortedByDescending { it.width * it.height }
                 ?.map { "${it.width}x${it.height}" } ?: emptyList()
 
+            // ── NOVOS campos ──────────────────────────────────────────────────
+
+            // Tamanho físico do array de pixels (ex: Size(4000, 3000) → 12 MP)
+            val pixelArraySize = chars.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)
+            val sensorPixelArraySize = pixelArraySize?.let { listOf(it.width, it.height) }
+
+            // Tamanho físico do sensor em milímetros
+            val physicalSize = chars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+            val sensorPhysicalSize = physicalSize?.let { listOf(it.width, it.height) }
+
+            // Distância mínima de foco (já lida acima como focusDist — reutilizar)
+            val lensMinFocusDistance = focusDist
+
+            // Tipo de cropping: CENTER_ONLY ou FREEFORM
+            val croppingType = when (chars.get(CameraCharacteristics.SCALER_CROPPING_TYPE)) {
+                CameraCharacteristics.SCALER_CROPPING_TYPE_FREEFORM    -> "FREEFORM"
+                CameraCharacteristics.SCALER_CROPPING_TYPE_CENTER_ONLY -> "CENTER_ONLY"
+                else -> "CENTER_ONLY"
+            }
+
+            // Regiões AF e AE máximas simultâneas
+            val maxRegionsAf = chars.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AF) ?: 0
+            val maxRegionsAe = chars.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AE) ?: 0
+
+            // Detecção de faces
+            val maxFaceCount = chars.get(CameraCharacteristics.STATISTICS_INFO_MAX_FACE_COUNT) ?: 0
+
             CameraCapabilities(
                 cameraId                     = cameraId,
                 hardwareLevel                = hwLevel,
@@ -137,7 +166,14 @@ object CameraCapabilitiesReader {
                 hasOis                       = hasOis,
                 focalLengths                 = focalLen.toList(),
                 apertures                    = apertures.toList(),
-                focusDistanceCalibration     = focusCalibration
+                focusDistanceCalibration     = focusCalibration,
+                sensorPixelArraySize         = sensorPixelArraySize,
+                sensorPhysicalSize           = sensorPhysicalSize,
+                lensMinFocusDistance         = lensMinFocusDistance,
+                scalerCroppingType           = croppingType,
+                maxRegionsAf                 = maxRegionsAf,
+                maxRegionsAe                 = maxRegionsAe,
+                maxFaceCount                 = maxFaceCount
             )
         } catch (e: Exception) {
             Log.e("CameraCapReader", "Erro ao ler caps id=$cameraId", e)
