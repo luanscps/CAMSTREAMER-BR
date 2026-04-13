@@ -10,6 +10,11 @@ package com.camera2rtsp
  *  2. RGGB com timer por canal (_rgT_R, _rgT_Gr, _rgT_Gb, _rgT_B)
  *  3. Poll 2000ms → 1000ms (feedback visual mais rápido)
  *  4. updateManualUI no poll protegido: só executa se o valor realmente mudou
+ *
+ * v5-CAMUI fixes:
+ *  A. AbortController no pollStatus (timeout 800ms) — sem requests pendurados
+ *  B. markActive('data-fps') no poll — FPS ativo restaurado ao trocar câmera
+ *  C. buildFpsButtons(fpsRanges) — FPS indisponível na lente fica disabled
  */
 object WebControlHtml {
 
@@ -154,7 +159,7 @@ object WebControlHtml {
         sb.append("</style></head><body>")
         sb.append("<div class=\"container\">")
         sb.append("<div class=\"header\"><h1>\uD83C\uDFA5 Camera2 RTMP Control</h1>")
-        sb.append("<p>Camera2 API · RootEncoder · NanoHTTPD · v4-RTMP</p></div>")
+        sb.append("<p>Camera2 API · RootEncoder · NanoHTTPD · v5-CAMUI</p></div>")
 
         // Status bar
         sb.append("<div class=\"statusbar\">")
@@ -406,7 +411,7 @@ object WebControlHtml {
         sb.append("</div>")
 
         sb.append("<p style=\"text-align:center;margin-top:16px;color:var(--muted);font-size:10px;padding-bottom:20px\">")
-        sb.append("Camera2 API · RootEncoder · NanoHTTPD · v4-RTMP</p>")
+        sb.append("Camera2 API · RootEncoder · NanoHTTPD · v5-CAMUI</p>")
         sb.append("</div>")
         sb.append("<div id=\"toast\" class=\"ok\">OK</div>")
 
@@ -423,9 +428,10 @@ object WebControlHtml {
         sb.append("var FRAME_STOPS=['1/15','1/24','1/30','1/60'];")
         sb.append("var _caps=null;var _currentCamId='0';var _isManual=false;var _rggbEnabled=false;")
         sb.append("var _toastTimer;var _pollFail=0;")
-        // FIX 1: zoom 250ms | FIX 2: RGGB timer por canal | outros sem mudança
         sb.append("var _brT,_zT,_fT,_iT,_eT,_shT,_frT;")
         sb.append("var _rgT_R,_rgT_Gr,_rgT_Gb,_rgT_B;")
+        // FIX A: AbortController para timeout do poll
+        sb.append("var _pollCtrl=null;")
         // Toast + feedback
         sb.append("function showToast(msg,isErr){var t=document.getElementById('toast');")
         sb.append("t.textContent=msg;t.className=isErr?'err':'ok';t.classList.add('show');")
@@ -449,7 +455,7 @@ object WebControlHtml {
         sb.append("function streamAction(action,btn){")
         sb.append("var msgs={start:'Stream iniciado',restart:'Stream reiniciado',stop:'Stream parado'};")
         sb.append("sendControl({streamAction:action},btn,msgs[action]||action);}")
-        // FIX 4: updateManualUI protegido — só executa se o valor realmente mudou
+        // updateManualUI protegido
         sb.append("function updateManualUI(isManual){")
         sb.append("if(_isManual===isManual)return;")
         sb.append("_isManual=isManual;")
@@ -477,7 +483,7 @@ object WebControlHtml {
         sb.append("sendControl({edgeMode:'high_quality',noiseReduction:'high_quality',hotPixel:'high_quality'},btn,'Qualidade Maxima');}")
         sb.append("function applyLatencyMin(btn){markActive('data-edge','off');markActive('data-nr','off');markActive('data-hotpx','off');")
         sb.append("sendControl({edgeMode:'off',noiseReduction:'off',hotPixel:'off'},btn,'Latencia Minima');}")
-        // ── RGGB — FIX 2: timer independente por canal ───────────────────
+        // ── RGGB — timer independente por canal ───────────────────────────
         sb.append("var _rggbR=1.0,_rggbGr=1.0,_rggbGb=1.0,_rggbB=1.0;")
         sb.append("function _rggbSendAll(){sendControl({rggbR:_rggbR,rggbGr:_rggbGr,rggbGb:_rggbGb,rggbB:_rggbB},null,'RGGB aplicado');}")
         sb.append("function updateRggb(ch,raw){var v=parseInt(raw,10)/100;")
@@ -522,17 +528,38 @@ object WebControlHtml {
         sb.append("sendControl({opticalZoom:idx},b,fl.toFixed(1)+'mm');};")
         sb.append("grp.appendChild(b);})(i,focalLengths[i]);}")
         sb.append("}")
+        // ── FIX C: buildFpsButtons — desabilita FPS não suportado pela lente ──
+        sb.append("function buildFpsButtons(fpsRanges){")
+        sb.append("var fg=document.getElementById('btngroup-fps');if(!fg)return;fg.innerHTML='';")
+        sb.append("[15,24,30,60].forEach(function(fps){")
+        sb.append("var b=document.createElement('button');")
+        sb.append("b.setAttribute('data-fps',fps);b.textContent=fps+' fps';")
+        sb.append("if(fps===30)b.classList.add('active');")
+        // Verifica se o fps cabe em pelo menos um range [min, max] da capability
+        sb.append("var supported=true;")
+        sb.append("if(fpsRanges&&fpsRanges.length>0){")
+        sb.append("supported=false;")
+        sb.append("for(var i=0;i<fpsRanges.length;i++){")
+        sb.append("var r=fpsRanges[i];")
+        sb.append("if(Array.isArray(r)&&r.length>=2&&fps>=r[0]&&fps<=r[1]){supported=true;break;}}")
+        sb.append("}")
+        sb.append("if(!supported){b.disabled=true;b.style.opacity='0.35';b.title='FPS nao suportado nesta lente';}")
+        sb.append("b.onclick=function(){if(!b.disabled){setFPS(fps,b);}};")
+        sb.append("fg.appendChild(b);});}")
         // Update UI for camera
         sb.append("function updateUIForCamera(camId){_currentCamId=String(camId);var cap=getCap(camId);")
         sb.append("if(!cap){showCard('card-zoom',true);showCard('card-focus',true);showCard('card-iso',true);")
         sb.append("showCard('card-ev',true);showCard('card-shutter',false);showCard('card-frame',false);")
         sb.append("showCard('card-wb',true);showCard('card-extras',true);showCard('card-postproc',false);")
         sb.append("showCard('card-optical-zoom',false);")
+        sb.append("buildFpsButtons([]);")
         sb.append("updateOISCapability(false);return;}")
         sb.append("var hasZoom=cap.zoom_range&&cap.zoom_range[1]>1.0;showCard('card-zoom',hasZoom!==false);")
         sb.append("var zs=document.getElementById('zoom');if(zs)zs.disabled=!hasZoom;")
-        // Zoom óptico — usa focal_lengths da cap
+        // Zoom óptico
         sb.append("buildOpticalZoomButtons(cap.focal_lengths||[]);")
+        // FPS buttons com capability de ranges
+        sb.append("buildFpsButtons(cap.available_fps_ranges||[]);")
         sb.append("var hasFocus=cap.focus_distance_range&&cap.focus_distance_range[1]>0;showCard('card-focus',hasFocus);")
         sb.append("var fs=document.getElementById('focus');if(fs)fs.disabled=!hasFocus;")
         sb.append("if(hasFocus&&cap.supported_af_modes){var fg=document.getElementById('btngroup-focusmode');fg.innerHTML='';")
@@ -580,7 +607,6 @@ object WebControlHtml {
         sb.append("clearTimeout(_brT);_brT=setTimeout(function(){sendControl({bitrate:+v},null,v+'kbps');},400);}")
         sb.append("function setBitratePreset(v){document.getElementById('bitrate').value=v;")
         sb.append("document.getElementById('br-value').textContent=v;sendControl({bitrate:v},null,v+'kbps');}")
-        // FIX 1: zoom debounce 150ms → 250ms
         sb.append("function updateZoom(v){var pct=parseFloat(v);var mult=(1+pct*7).toFixed(1);")
         sb.append("document.getElementById('zoom-val').textContent=mult+'x';")
         sb.append("clearTimeout(_zT);_zT=setTimeout(function(){sendControl({zoom:pct},null,'Zoom '+mult+'x');},250);}")
@@ -618,12 +644,17 @@ object WebControlHtml {
         sb.append("function syncChk(id,val){var el=document.getElementById(id);if(el&&el.checked!==val)el.checked=val;}")
         sb.append("function syncSlider(id,val,mn,mx){if(!val)return;var el=document.getElementById(id);if(!el)return;")
         sb.append("var v=Math.max(mn,Math.min(mx,+val));if(document.activeElement!==el)el.value=v;}")
-        // Monitor ao vivo helpers
+        // Monitor helpers
         sb.append("function afClass(s){return s==='focused'||s==='passive_focused'?'green':s==='scanning'||s==='passive_scan'?'yellow':''}")
         sb.append("function aeClass(s){return s==='converged'?'green':s==='searching'?'yellow':s==='locked'?'green':''}")
-        // FIX 3: pollStatus — intervalo 2000ms → 1000ms (definido no setInterval abaixo)
-        sb.append("function pollStatus(){var t0=Date.now();fetch('/api/status')")
-        sb.append(".then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})")
+        // ── FIX A: pollStatus com AbortController (timeout 800ms) ───────────
+        sb.append("function pollStatus(){")
+        sb.append("if(_pollCtrl){try{_pollCtrl.abort();}catch(e){}}")
+        sb.append("_pollCtrl=new AbortController();")
+        sb.append("var tid=setTimeout(function(){try{_pollCtrl.abort();}catch(e){}},800);")
+        sb.append("var t0=Date.now();")
+        sb.append("fetch('/api/status',{signal:_pollCtrl.signal})")
+        sb.append(".then(function(r){clearTimeout(tid);if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})")
         sb.append(".then(function(d){var lat=Date.now()-t0;var c=d.curvals||{};_pollFail=0;")
         sb.append("var lc=latClass(lat);")
         sb.append("document.getElementById('dot-stream').className='dot'+(d.streaming?'':' off');")
@@ -637,7 +668,6 @@ object WebControlHtml {
         sb.append("if(rtmpSpan)rtmpSpan.textContent=d.rtmp_url||'-';")
         sb.append("if(d.rtmp_url){var inp=document.getElementById('rtmp-input');")
         sb.append("if(inp&&document.activeElement!==inp)inp.value=d.rtmp_url;}")
-        // FIX 4: guard — só chama updateManualUI se o valor mudou (a função em si já tem o guard interno)
         sb.append("var isManual=c.manual_sensor==='on';")
         sb.append("updateManualUI(isManual);")
         sb.append("syncChk('toggle-ois',c.ois==='on');")
@@ -660,6 +690,8 @@ object WebControlHtml {
         sb.append("markActive('data-edge',c.edge_mode);")
         sb.append("markActive('data-nr',c.noise_reduction_mode);")
         sb.append("markActive('data-hotpx',c.hot_pixel_mode);")
+        // FIX B: restaura botão FPS ativo ao trocar câmera
+        sb.append("if(c.fps)markActive('data-fps',+c.fps);")
         // Zoom óptico ativo
         sb.append("if(c.optical_zoom&&c.optical_zoom!=='digital'){")
         sb.append("var ozv=document.getElementById('optical-zoom-val');")
@@ -673,7 +705,7 @@ object WebControlHtml {
         sb.append("if(stRggb)stRggb.textContent=rggbOn?'Ativo':'Off';")
         sb.append("var cardRggb=document.getElementById('card-rggb');")
         sb.append("if(cardRggb){if(rggbOn)cardRggb.classList.add('rggb-active');else cardRggb.classList.remove('rggb-active');}")
-        // ── Monitor Ao Vivo — atualizado a cada poll ──────────────────────
+        // Monitor Ao Vivo
         sb.append("var liveIso=c.live_iso||'0';")
         sb.append("var liveShutter=nsToShutter(+(c.live_exposure_ns||0));")
         sb.append("var afState=c.live_af_state||'-';")
@@ -688,7 +720,9 @@ object WebControlHtml {
         sb.append("var monGb=document.getElementById('mon-rggb-gb');if(monGb)monGb.textContent=c.live_rggb_gb||'-';")
         // Camera switch detection
         sb.append("if(_currentCamId!==c.camera_id&&c.camera_id){updateUIForCamera(c.camera_id);}")
-        sb.append("}).catch(function(){_pollFail++;")
+        sb.append("}).catch(function(e){clearTimeout(tid);")
+        sb.append("if(e&&e.name==='AbortError')return;")
+        sb.append("_pollFail++;")
         sb.append("if(_pollFail>=3){document.getElementById('dot-stream').className='dot off';")
         sb.append("document.getElementById('lbl-stream').textContent='Sem conexao';}});}")
         // initCapabilities
@@ -701,19 +735,17 @@ object WebControlHtml {
         sb.append("b.textContent=cap.name||(cap.facing==='front'?'\uD83E\uDD33 Frontal':'\uD83D\uDCF7 Cam '+cap.camera_id);")
         sb.append("b.onclick=function(){switchCamera(cap.camera_id);};cg.appendChild(b);})(caps[i]);}")
         sb.append("var rg=document.getElementById('btngroup-resolution');rg.innerHTML='';")
-        sb.append("var fg=document.getElementById('btngroup-fps');fg.innerHTML='';")
         sb.append("var fc=null;for(var i=0;i<caps.length;i++){if(!caps[i].is_depth){fc=caps[i];break;}}")
         sb.append("if(fc){var ps=[{res:'720p',key:'1280x720',lbl:'HD 720p'},{res:'1080p',key:'1920x1080',lbl:'FHD 1080p'},{res:'4k',key:'3840x2160',lbl:'4K'}];")
         sb.append("for(var j=0;j<ps.length;j++){(function(p){")
         sb.append("if(!fc.available_resolutions||fc.available_resolutions.indexOf(p.key)<0)return;")
         sb.append("var b=document.createElement('button');b.setAttribute('data-res',p.res);b.textContent=p.lbl;")
         sb.append("b.onclick=function(){setResolution(p.res,b);};rg.appendChild(b);})(ps[j]);}")
-        sb.append("[15,24,30,60].forEach(function(fps){var b=document.createElement('button');")
-        sb.append("b.setAttribute('data-fps',fps);b.textContent=fps+' fps';if(fps===30)b.classList.add('active');")
-        sb.append("b.onclick=function(){setFPS(fps,b);};fg.appendChild(b);});")
+        // FIX C: usa buildFpsButtons com ranges da câmera padrão
+        sb.append("buildFpsButtons(fc.available_fps_ranges||[]);")
         sb.append("updateUIForCamera(fc.camera_id);}")
         sb.append("}).catch(function(e){console.warn('caps error',e);})}")
-        // FIX 3: poll a cada 1000ms (era 2000ms)
+        // poll a cada 1000ms
         sb.append("initCapabilities();pollStatus();setInterval(pollStatus,1000);")
         sb.append("</script></body></html>")
         return sb.toString()
