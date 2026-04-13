@@ -48,23 +48,19 @@ class Camera2Controller {
     var hotPixelMode       = CameraMetadata.HOT_PIXEL_MODE_HIGH_QUALITY
 
     // -------------------------------------------------------------------------
-    // Zoom Óptico — lista de focal lengths disponíveis no dispositivo
-    // opticalZoomIndex = índice na lista; -1 = não ativo (usa zoom digital)
+    // Zoom Óptico
     // -------------------------------------------------------------------------
-    var opticalZoomLevels: List<Float> = emptyList()   // populado em discoverAllCameras
-    var opticalZoomIndex  = -1                         // -1 = inativo
+    var opticalZoomLevels: List<Float> = emptyList()
+    var opticalZoomIndex  = -1
 
     // -------------------------------------------------------------------------
     // WB Manual por canal RGGB
-    // rggbGains[0]=R, [1]=Gr, [2]=Gb, [3]=B  (1.0f = neutro)
-    // rggbEnabled=false => usa AWB normal
     // -------------------------------------------------------------------------
     var rggbEnabled = false
     var rggbGains   = floatArrayOf(1f, 1f, 1f, 1f)
 
     // -------------------------------------------------------------------------
-    // Monitor Ao Vivo — atualizado pelo setCustomOnCaptureCompletedCallback
-    // Leitura thread-safe via @Volatile; WebControlApi lê direto
+    // Monitor Ao Vivo
     // -------------------------------------------------------------------------
     @Volatile var liveIso        = 0
     @Volatile var liveExposureNs = 0L
@@ -76,21 +72,16 @@ class Camera2Controller {
     @Volatile var liveAeState    = "unknown"
 
     // -------------------------------------------------------------------------
-    // Worker thread — todas as operações de câmera passam por aqui
+    // Worker thread
     // -------------------------------------------------------------------------
-
     private val workerThread = HandlerThread("CameraWorker").also { it.start() }
     private val worker = Handler(workerThread.looper)
     private fun post(block: () -> Unit) =
         worker.post { runCatching(block).onFailure { Log.e(tag, "worker error", it) } }
 
     // -------------------------------------------------------------------------
-    // FIX 1: Reflection — lazy cache apenas para os campos que NÃO mudam entre
-    // sessões (os java.lang.reflect.Field/Method do bytecode são estáticos).
-    // O builderInputSurface em si muda a cada nova sessão de câmera, por isso
-    // ele NÃO pode ser cacheado — deve ser lido a cada chamada de applyOnBuilder.
+    // Reflection — lazy cache para campos estáticos
     // -------------------------------------------------------------------------
-
     private val reflField_cameraManager: java.lang.reflect.Field? by lazy {
         runCatching {
             Camera2Base::class.java.getDeclaredField("cameraManager")
@@ -99,9 +90,6 @@ class Camera2Controller {
          .getOrNull()
     }
 
-    // FIX 1: NÃO usa lazy — o campo Field é resolvido uma vez (ok) mas o
-    // *valor* (builderInputSurface) muda a cada sessão, então guardamos apenas
-    // o Field e lemos o valor dinamicamente em applyOnBuilder.
     private val reflField_builderInputSurface: java.lang.reflect.Field? by lazy {
         runCatching {
             Camera2ApiManager::class.java.getDeclaredField("builderInputSurface")
@@ -123,15 +111,14 @@ class Camera2Controller {
         val ok = reflField_cameraManager != null &&
                  reflField_builderInputSurface != null &&
                  reflMethod_applyRequest != null
-        if (ok) Log.i(tag, "[reflection] cache OK — lazy resolvido com sucesso")
-        else    Log.w(tag, "[reflection] INDISPONÍVEL — pós-processamento desativado")
+        if (ok) Log.i(tag, "[reflection] cache OK")
+        else    Log.w(tag, "[reflection] INDISPONÍVEL")
         ok
     }
 
     // -------------------------------------------------------------------------
     // Helpers de reflection
     // -------------------------------------------------------------------------
-
     private fun getCam2Manager(): Camera2ApiManager? {
         if (!reflectionAvailable) return null
         return runCatching {
@@ -139,8 +126,6 @@ class Camera2Controller {
         }.onFailure { Log.e(tag, "getCam2Manager falhou", it) }.getOrNull()
     }
 
-    // FIX 1 (core): lê o builderInputSurface a CADA chamada — nunca cacheia o valor,
-    // apenas o Field. Isso garante que após troca de câmera o builder correto é usado.
     private fun applyOnBuilder(block: (CaptureRequest.Builder) -> Unit): Boolean {
         if (!reflectionAvailable) return false
         val cam = getCam2Manager() ?: run {
@@ -148,7 +133,6 @@ class Camera2Controller {
             return false
         }
         return runCatching {
-            // Lê o builder fresco a cada invocação — não usa cache
             val builder = reflField_builderInputSurface!!.get(cam) as? CaptureRequest.Builder
                 ?: run { Log.w(tag, "builderInputSurface nulo"); return false }
             block(builder)
@@ -157,14 +141,8 @@ class Camera2Controller {
     }
 
     // -------------------------------------------------------------------------
-    // FIX 2 + 3: Monitor ao vivo — registra o callback no Camera2ApiManager.
-    // Usa postDelayed(300ms) para garantir que a nova sessão de câmera já está
-    // aberta antes de tentar registrar o callback.
-    // Chamado em:
-    //   • initLiveMonitorDelayed()  — pós troca de câmera (delay 300ms)
-    //   • onStreamStarted()         — quando o stream inicia (delay 500ms)
+    // Monitor ao vivo
     // -------------------------------------------------------------------------
-
     fun initLiveMonitor() {
         val cam2mgr = getCam2Manager() ?: run {
             Log.w(tag, "[liveMonitor] getCam2Manager nulo — abortando")
@@ -198,25 +176,21 @@ class Camera2Controller {
                 }
             }
             Log.i(tag, "[liveMonitor] callback registrado com sucesso")
-        }.onFailure { Log.w(tag, "[liveMonitor] setCustomOnCaptureCompletedCallback falhou: ${it.message}") }
+        }.onFailure { Log.w(tag, "[liveMonitor] falhou: ${it.message}") }
     }
 
-    // FIX 2: delay de 300ms após troca de câmera para aguardar nova sessão
     fun initLiveMonitorDelayed(delayMs: Long = 300L) {
         worker.postDelayed({ initLiveMonitor() }, delayMs)
     }
 
-    // FIX 3: chamado pelo RtmpStreamer após startStream com delay maior (500ms)
-    // pois o encoder precisa de um pouco mais de tempo para abrir a sessão
     fun onStreamStarted() {
         worker.postDelayed({ initLiveMonitor() }, 500L)
         Log.i(tag, "[liveMonitor] onStreamStarted agendado (500ms)")
     }
 
     // -------------------------------------------------------------------------
-    // Post Processing com debounce
+    // Post Processing
     // -------------------------------------------------------------------------
-
     private var postProcPending = false
 
     private val postProcRunnable = Runnable {
@@ -238,13 +212,11 @@ class Camera2Controller {
     }
 
     // -------------------------------------------------------------------------
-    // Aplica gains RGGB via builder (WB Manual)
+    // RGGB
     // -------------------------------------------------------------------------
-
     private fun applyRggbGains() {
         post {
             val ok = applyOnBuilder { b ->
-                // Desativa AWB automático para aplicar ganhos manuais
                 b.set(CaptureRequest.CONTROL_AWB_MODE, CameraMetadata.CONTROL_AWB_MODE_OFF)
                 val rggb = android.hardware.camera2.params.RggbChannelVector(
                     rggbGains[0], rggbGains[1], rggbGains[2], rggbGains[3]
@@ -257,9 +229,8 @@ class Camera2Controller {
     }
 
     // -------------------------------------------------------------------------
-    // Aplica zoom óptico via LENS_FOCAL_LENGTH
+    // Zoom Óptico
     // -------------------------------------------------------------------------
-
     private fun applyOpticalZoom(focalLength: Float) {
         post {
             val ok = applyOnBuilder { b ->
@@ -272,7 +243,6 @@ class Camera2Controller {
     // -------------------------------------------------------------------------
     // Sensor manual / auto
     // -------------------------------------------------------------------------
-
     private fun applyManualSensor() {
         val safeDuration = maxOf(frameDurationNs, exposureNs)
         post {
@@ -299,9 +269,158 @@ class Camera2Controller {
     }
 
     // -------------------------------------------------------------------------
+    // FIX: Zoom Digital via applyOnBuilder para efeito imediato
+    // -------------------------------------------------------------------------
+    private fun applyDigitalZoom(cam: RtmpCamera2, zNorm: Float) {
+        post {
+            // 1) aplica pelo método de alto nível da RootEncoder
+            val zr = cam.zoomRange
+            cam.setZoom(zr.lower + zNorm * (zr.upper - zr.lower))
+            // 2) garante que o builder foi atualizado imediatamente
+            val ok = applyOnBuilder { b ->
+                val rect = cam.zoomRect  // retorna o Rect atual após setZoom
+                if (rect != null) b.set(CaptureRequest.SCALER_CROP_REGION, rect)
+            }
+            Log.d(tag, "digitalZoom ok=$ok zNorm=$zNorm")
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // FIX: Foco via applyOnBuilder para efeito imediato
+    // -------------------------------------------------------------------------
+    private fun applyFocusDistance(cam: RtmpCamera2, dist: Float) {
+        post {
+            val ok = applyOnBuilder { b ->
+                b.set(CaptureRequest.CONTROL_AF_MODE,    CameraMetadata.CONTROL_AF_MODE_OFF)
+                b.set(CaptureRequest.LENS_FOCUS_DISTANCE, dist)
+            }
+            Log.d(tag, "focusDistance ok=$ok dist=$dist")
+        }
+    }
+
+    private fun applyAutoFocus(cam: RtmpCamera2) {
+        post {
+            val ok = applyOnBuilder { b ->
+                b.set(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
+            }
+            if (!ok) cam.enableAutoFocus()
+            Log.d(tag, "autoFocus ok=$ok")
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // FIX: Lanterna via applyOnBuilder para efeito imediato
+    // -------------------------------------------------------------------------
+    private fun applyTorch(cam: RtmpCamera2, enable: Boolean) {
+        post {
+            val ok = applyOnBuilder { b ->
+                b.set(CaptureRequest.FLASH_MODE,
+                    if (enable) CameraMetadata.FLASH_MODE_TORCH
+                    else        CameraMetadata.FLASH_MODE_OFF)
+                b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON)
+            }
+            // fallback para o método de alto nível se reflection falhar
+            if (!ok) { if (enable) cam.enableLantern() else cam.disableLantern() }
+            Log.d(tag, "torch ok=$ok enable=$enable")
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // FIX: OIS via applyOnBuilder para efeito imediato
+    // -------------------------------------------------------------------------
+    private fun applyOIS(cam: RtmpCamera2, enable: Boolean) {
+        post {
+            val ok = applyOnBuilder { b ->
+                b.set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
+                    if (enable) CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_ON
+                    else        CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_OFF)
+            }
+            if (!ok) {
+                if (enable) cam.enableOpticalVideoStabilization()
+                else        cam.disableOpticalVideoStabilization()
+            }
+            Log.d(tag, "ois ok=$ok enable=$enable")
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // FIX: EIS via applyOnBuilder para efeito imediato
+    // -------------------------------------------------------------------------
+    private fun applyEIS(cam: RtmpCamera2, enable: Boolean) {
+        post {
+            val ok = applyOnBuilder { b ->
+                b.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                    if (enable) CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON
+                    else        CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
+            }
+            if (!ok) {
+                if (enable) cam.enableVideoStabilization()
+                else        cam.disableVideoStabilization()
+            }
+            Log.d(tag, "eis ok=$ok enable=$enable")
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // FIX: AE Lock via applyOnBuilder para efeito imediato
+    // -------------------------------------------------------------------------
+    private fun applyAELock(cam: RtmpCamera2, lock: Boolean) {
+        post {
+            val ok = applyOnBuilder { b ->
+                b.set(CaptureRequest.CONTROL_AE_LOCK, lock)
+            }
+            if (!ok) {
+                if (lock) cam.disableAutoExposure() else cam.enableAutoExposure()
+            }
+            Log.d(tag, "aeLock ok=$ok lock=$lock")
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // FIX: AWB Lock via applyOnBuilder para efeito imediato
+    // -------------------------------------------------------------------------
+    private fun applyAWBLock(cam: RtmpCamera2, lock: Boolean) {
+        post {
+            val ok = applyOnBuilder { b ->
+                b.set(CaptureRequest.CONTROL_AWB_LOCK, lock)
+            }
+            if (!ok) {
+                if (lock) cam.disableAutoWhiteBalance()
+                else      cam.enableAutoWhiteBalance(CameraMetadata.CONTROL_AWB_MODE_AUTO)
+            }
+            Log.d(tag, "awbLock ok=$ok lock=$lock")
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // FIX: Flash mode via applyOnBuilder para efeito imediato
+    // -------------------------------------------------------------------------
+    private fun applyFlashMode(cam: RtmpCamera2, mode: String) {
+        post {
+            val flashVal = when (mode) {
+                "torch"  -> CameraMetadata.FLASH_MODE_TORCH
+                "single" -> CameraMetadata.FLASH_MODE_SINGLE
+                else     -> CameraMetadata.FLASH_MODE_OFF
+            }
+            val ok = applyOnBuilder { b ->
+                b.set(CaptureRequest.FLASH_MODE, flashVal)
+                if (mode == "torch") {
+                    b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON)
+                }
+            }
+            if (!ok) {
+                when (mode) {
+                    "torch" -> { cam.enableLantern(); lanternEnabled = true }
+                    else    -> { cam.disableLantern(); lanternEnabled = false }
+                }
+            }
+            Log.d(tag, "flashMode ok=$ok mode=$mode")
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // updateSettings
     // -------------------------------------------------------------------------
-
     fun updateSettings(params: Map<String, Any>) {
         val cam = rtmpCamera ?: run { Log.w(tag, "rtmpCamera nulo"); return }
 
@@ -354,6 +473,7 @@ class Camera2Controller {
             }
         }
 
+        // FIX: Foco imediato
         params["focus"]?.let {
             val norm = when (it) {
                 is Double -> it.toFloat()
@@ -361,10 +481,11 @@ class Camera2Controller {
                 else      -> it.toString().toFloatOrNull() ?: 0f
             }.coerceIn(0f, 1f)
             if (norm == 0f) {
-                autoFocus = true; focusDistance = 0f; cam.enableAutoFocus()
+                autoFocus = true; focusDistance = 0f
+                applyAutoFocus(cam)
             } else {
                 autoFocus = false; focusDistance = norm * 10f
-                cam.disableAutoFocus(); cam.setFocusDistance(focusDistance)
+                applyFocusDistance(cam, focusDistance)
             }
             Log.d(tag, "focus norm=$norm dist=$focusDistance")
         }
@@ -372,18 +493,32 @@ class Camera2Controller {
         params["focusmode"]?.let {
             when (it as String) {
                 "continuous-video", "continuous-picture", "auto" -> {
-                    autoFocus = true; focusDistance = 0f; cam.enableAutoFocus()
+                    autoFocus = true; focusDistance = 0f
+                    applyAutoFocus(cam)
                 }
-                "off" -> cam.disableAutoFocus()
+                "off" -> {
+                    post {
+                        applyOnBuilder { b ->
+                            b.set(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_OFF)
+                        }
+                    }
+                }
             }
             Log.d(tag, "focusMode -> $it")
         }
 
-        params["afTrigger"]?.let { cam.enableAutoFocus(); Log.d(tag, "afTrigger") }
+        params["afTrigger"]?.let {
+            post {
+                applyOnBuilder { b ->
+                    b.set(CaptureRequest.CONTROL_AF_MODE,    CameraMetadata.CONTROL_AF_MODE_AUTO)
+                    b.set(CaptureRequest.CONTROL_AF_TRIGGER, CameraMetadata.CONTROL_AF_TRIGGER_START)
+                }
+            }
+            Log.d(tag, "afTrigger")
+        }
 
         params["whiteBalance"]?.let {
             whiteBalanceMode = it as String
-            // Ao trocar modo AWB desativa RGGB manual
             rggbEnabled = false
             val mode = when (whiteBalanceMode) {
                 "daylight"                 -> CameraMetadata.CONTROL_AWB_MODE_DAYLIGHT
@@ -392,29 +527,22 @@ class Camera2Controller {
                 "fluorescent"              -> CameraMetadata.CONTROL_AWB_MODE_FLUORESCENT
                 else                       -> CameraMetadata.CONTROL_AWB_MODE_AUTO
             }
-            cam.enableAutoWhiteBalance(mode)
+            post {
+                val ok = applyOnBuilder { b ->
+                    b.set(CaptureRequest.CONTROL_AWB_MODE, mode)
+                    b.set(CaptureRequest.CONTROL_AWB_LOCK, false)
+                }
+                if (!ok) cam.enableAutoWhiteBalance(mode)
+            }
             Log.d(tag, "WB -> $whiteBalanceMode")
         }
 
-        // ── WB Manual RGGB ────────────────────────────────────────────────────
+        // RGGB
         var rggbDirty = false
-
-        params["rggbR"]?.let {
-            rggbGains[0] = toFloat(it).coerceIn(0.1f, 4f)
-            rggbEnabled = true; rggbDirty = true
-        }
-        params["rggbGr"]?.let {
-            rggbGains[1] = toFloat(it).coerceIn(0.1f, 4f)
-            rggbEnabled = true; rggbDirty = true
-        }
-        params["rggbGb"]?.let {
-            rggbGains[2] = toFloat(it).coerceIn(0.1f, 4f)
-            rggbEnabled = true; rggbDirty = true
-        }
-        params["rggbB"]?.let {
-            rggbGains[3] = toFloat(it).coerceIn(0.1f, 4f)
-            rggbEnabled = true; rggbDirty = true
-        }
+        params["rggbR"]?.let  { rggbGains[0] = toFloat(it).coerceIn(0.1f, 4f); rggbEnabled = true; rggbDirty = true }
+        params["rggbGr"]?.let { rggbGains[1] = toFloat(it).coerceIn(0.1f, 4f); rggbEnabled = true; rggbDirty = true }
+        params["rggbGb"]?.let { rggbGains[2] = toFloat(it).coerceIn(0.1f, 4f); rggbEnabled = true; rggbDirty = true }
+        params["rggbB"]?.let  { rggbGains[3] = toFloat(it).coerceIn(0.1f, 4f); rggbEnabled = true; rggbDirty = true }
         (params["rggbGains"] as? List<*>)?.let { list ->
             if (list.size >= 4) {
                 rggbGains[0] = toFloat(list[0]).coerceIn(0.1f, 4f)
@@ -427,13 +555,18 @@ class Camera2Controller {
         params["rggbReset"]?.let {
             rggbGains = floatArrayOf(1f, 1f, 1f, 1f)
             rggbEnabled = false
-            cam.enableAutoWhiteBalance(CameraMetadata.CONTROL_AWB_MODE_AUTO)
+            post {
+                applyOnBuilder { b ->
+                    b.set(CaptureRequest.CONTROL_AWB_MODE, CameraMetadata.CONTROL_AWB_MODE_AUTO)
+                    b.set(CaptureRequest.CONTROL_AWB_LOCK, false)
+                }
+            }
             whiteBalanceMode = "auto"
             Log.d(tag, "rggbReset")
         }
         if (rggbDirty) applyRggbGains()
 
-        // ── Zoom Digital ──────────────────────────────────────────────────────
+        // FIX: Zoom Digital imediato
         params["zoom"]?.let {
             val z = when (it) {
                 is Double -> it.toFloat()
@@ -442,12 +575,11 @@ class Camera2Controller {
             }.coerceIn(0f, 1f)
             zoomLevel = z
             opticalZoomIndex = -1
-            val zr = cam.zoomRange
-            cam.setZoom(zr.lower + z * (zr.upper - zr.lower))
-            Log.d(tag, "zoom -> $z (real=${zr.lower + z * (zr.upper - zr.lower)})")
+            applyDigitalZoom(cam, z)
+            Log.d(tag, "zoom -> $z")
         }
 
-        // ── Zoom Óptico ───────────────────────────────────────────────────────
+        // Zoom Óptico
         params["opticalZoom"]?.let { raw ->
             val idx = when (raw) {
                 is Double -> raw.toInt()
@@ -458,53 +590,52 @@ class Camera2Controller {
                 opticalZoomIndex = idx
                 applyOpticalZoom(opticalZoomLevels[idx])
                 zoomLevel = 0f
-                val zr = cam.zoomRange
-                cam.setZoom(zr.lower)
+                post { cam.setZoom(cam.zoomRange.lower) }
                 Log.d(tag, "opticalZoom idx=$idx focalLength=${opticalZoomLevels[idx]}mm")
             } else {
-                Log.w(tag, "opticalZoom idx=$idx inválido (disponíveis: ${opticalZoomLevels.size})")
+                Log.w(tag, "opticalZoom idx=$idx inválido")
             }
         }
 
+        // FIX: Lanterna imediata
         params["lantern"]?.let {
             lanternEnabled = it as Boolean
-            if (lanternEnabled) cam.enableLantern() else cam.disableLantern()
+            applyTorch(cam, lanternEnabled)
             Log.d(tag, "lantern -> $lanternEnabled")
         }
 
+        // FIX: OIS imediato
         params["ois"]?.let {
             oisEnabled = it as Boolean
-            if (oisEnabled) cam.enableOpticalVideoStabilization()
-            else cam.disableOpticalVideoStabilization()
+            applyOIS(cam, oisEnabled)
             Log.d(tag, "ois -> $oisEnabled")
         }
 
+        // FIX: EIS imediato
         params["eis"]?.let {
             eisEnabled = it as Boolean
-            if (eisEnabled) cam.enableVideoStabilization()
-            else cam.disableVideoStabilization()
+            applyEIS(cam, eisEnabled)
             Log.d(tag, "eis -> $eisEnabled")
         }
 
+        // FIX: AE Lock imediato
         params["aeLock"]?.let {
             aeLocked = it as Boolean
-            if (aeLocked) cam.disableAutoExposure() else cam.enableAutoExposure()
+            applyAELock(cam, aeLocked)
             Log.d(tag, "aeLock -> $aeLocked")
         }
 
+        // FIX: AWB Lock imediato
         params["awbLock"]?.let {
             awbLocked = it as Boolean
-            if (awbLocked) cam.disableAutoWhiteBalance()
-            else cam.enableAutoWhiteBalance(CameraMetadata.CONTROL_AWB_MODE_AUTO)
+            applyAWBLock(cam, awbLocked)
             Log.d(tag, "awbLock -> $awbLocked")
         }
 
+        // FIX: Flash Mode imediato
         params["flashMode"]?.let {
             flashMode = it as String
-            when (flashMode) {
-                "torch" -> { cam.enableLantern(); lanternEnabled = true }
-                else    -> { cam.disableLantern(); lanternEnabled = false }
-            }
+            applyFlashMode(cam, flashMode)
             Log.d(tag, "flashMode -> $flashMode")
         }
 
@@ -547,10 +678,9 @@ class Camera2Controller {
             }
             post {
                 cam.switchCamera(currentCameraId)
-                // FIX 2: usa delay para aguardar a nova sessão abrir antes de registrar callback
                 initLiveMonitorDelayed(300L)
                 if (manualSensor) applyManualSensor()
-                else if (!autoFocus && focusDistance > 0f) cam.setFocusDistance(focusDistance)
+                else if (!autoFocus && focusDistance > 0f) applyFocusDistance(cam, focusDistance)
                 Log.d(tag, "camera -> $currentCameraId")
             }
         }
@@ -616,7 +746,6 @@ class Camera2Controller {
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
-
     private fun toFloat(v: Any?): Float = when (v) {
         is Double -> v.toFloat()
         is Float  -> v
@@ -649,7 +778,6 @@ class Camera2Controller {
     // -------------------------------------------------------------------------
     // Discovery de cameras
     // -------------------------------------------------------------------------
-
     fun discoverAllCameras(context: Context): List<CameraCapabilities> {
         val mgr = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
         val cameras = mutableListOf<CameraCapabilities>()
