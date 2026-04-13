@@ -31,19 +31,24 @@ data class CameraCapabilities(
     // escritas com apenas a 1ª letra maiúscula para gerar o snake_case correto:
     //   supportedAFModes  -> supported_a_f_modes  (ERRADO)
     //   supportedAfModes  -> supported_af_modes   (CORRETO)
-    //   supportedAEModes  -> supported_a_e_modes  (ERRADO)
-    //   supportedAeModes  -> supported_ae_modes   (CORRETO)
-    //   supportedAWBModes -> supported_a_w_b_modes (ERRADO)
-    //   supportedAwbModes -> supported_awb_modes  (CORRETO)
     val supportedAfModes: List<String>,
     val supportedAeModes: List<String>,
     val supportedAwbModes: List<String>,
 
+    // ── NOVOS: Scene Modes e Effect Modes ─────────────────────────────────
+    // Lista de modos de cena disponíveis no hardware (ex: "night", "action", "portrait")
+    val supportedSceneModes: List<String>,
+    // Lista de efeitos de cor disponíveis (ex: "mono", "sepia", "negative")
+    val supportedEffectModes: List<String>,
+
     // Hardware físico
-    // NOTA: hasOis (não hasOIS) — mesma regra acima
-    //   hasOIS -> has_o_i_s (ERRADO), hasOis -> has_ois (CORRETO)
     val hasFlash: Boolean,
     val hasOis: Boolean,
     val focalLengths: List<Float>,
-    val apertures: List<Float>
+    val apertures: List<Float>,
+
+    // ── NOVO: Calibração do foco ───────────────────────────────────────────
+    // "UNCALIBRATED" | "APPROXIMATE" | "CALIBRATED"
+    // Afeta como os valores do slider de foco devem ser interpretados
+    val focusDistanceCalibration: String
 )
