@@ -4,8 +4,12 @@
 
 **Powered by:** Kotlin + Camera2 API + [RootEncoder](https://github.com/pedroSG94/RootEncoder) + WebGUI embutida
 
----
+------------
+📸 Screenshot
+<img width="948" height="3117" alt="image" src="https://github.com/user-attachments/assets/3cdaf87c-7547-47ce-9287-ed9d41741b7f" />
 
+
+------------
 ## Stack Técnica
 
 | Camada | Tecnologia |
