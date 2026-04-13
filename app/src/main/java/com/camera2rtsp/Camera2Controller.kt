@@ -801,6 +801,22 @@ class Camera2Controller {
                 facing == "FRONT"              -> "Frontal $id"
                 else                           -> "Cam $id"
             }
+
+            // ── Campos novos de CameraCapabilities ──────────────────────────────
+            val pixelArraySize   = ch.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)
+            val sensorPixelArr   = pixelArraySize?.let { listOf(it.width, it.height) }
+            val physicalSize     = ch.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+            val sensorPhysical   = physicalSize?.let { listOf(it.width, it.height) }
+            val lensMinFocus     = ch.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE)
+            val croppingType     = when (ch.get(CameraCharacteristics.SCALER_CROPPING_TYPE)) {
+                CameraCharacteristics.SCALER_CROPPING_TYPE_FREEFORM    -> "FREEFORM"
+                CameraCharacteristics.SCALER_CROPPING_TYPE_CENTER_ONLY -> "CENTER_ONLY"
+                else -> "CENTER_ONLY"
+            }
+            val maxRegionsAf     = ch.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AF) ?: 0
+            val maxRegionsAe     = ch.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AE) ?: 0
+            val maxFaceCount     = ch.get(CameraCharacteristics.STATISTICS_INFO_MAX_FACE_COUNT) ?: 0
+
             cameras.add(CameraCapabilities(
                 cameraId = id, hardwareLevel = hwLevel, facing = facing, name = name,
                 isDepth = isDepth, supportsManualSensor = supManual,
@@ -816,7 +832,14 @@ class Camera2Controller {
                 supportedEffectModes = effectModes,
                 hasFlash = hasFlash, hasOis = hasOis,
                 focalLengths = focalLengths, apertures = apertures,
-                focusDistanceCalibration = focusCalibration
+                focusDistanceCalibration = focusCalibration,
+                sensorPixelArraySize = sensorPixelArr,
+                sensorPhysicalSize   = sensorPhysical,
+                lensMinFocusDistance = lensMinFocus,
+                scalerCroppingType   = croppingType,
+                maxRegionsAf         = maxRegionsAf,
+                maxRegionsAe         = maxRegionsAe,
+                maxFaceCount         = maxFaceCount
             ))
         }
         return cameras
