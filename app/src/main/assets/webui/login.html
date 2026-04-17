@@ -25,15 +25,15 @@
   .logo{font-size:11px;letter-spacing:.18em;color:var(--muted);
         text-align:center;margin-bottom:6px;text-transform:uppercase}
   h1{font-size:19px;font-weight:700;text-align:center;margin-bottom:4px}
-  .sub{font-size:12px;color:var(--muted);text-align:center;margin-bottom:32px}
-  label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;margin-top:20px}
-  input[type=password]{
+  .sub{font-size:12px;color:var(--muted);text-align:center;margin-bottom:28px}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;margin-top:18px}
+  input{
     width:100%;height:44px;background:#0d0d0d;
     border:1px solid var(--border);border-radius:8px;
     color:var(--text);font-size:14px;padding:0 14px;
     outline:none;transition:border-color .2s;
   }
-  input[type=password]:focus{border-color:var(--accent)}
+  input:focus{border-color:var(--accent)}
   .btn{
     margin-top:24px;width:100%;height:44px;
     background:var(--accent);border:none;border-radius:8px;
@@ -44,91 +44,53 @@
   .btn:disabled{background:#333;color:#666;cursor:not-allowed}
   .error{min-height:18px;margin-top:12px;
          font-size:12px;color:#ff5252;text-align:center}
-  .hint{
-    margin-top:20px;padding:12px;border-radius:8px;
-    background:#1a1400;border:1px solid #3a2e00;
-    font-size:11px;color:#b0900a;line-height:1.5;display:none;
-  }
-  .badge-plan{
-    display:none;margin-top:14px;text-align:center;
-    font-size:12px;color:#4caf50;
-  }
-  .logout-btn{
-    display:none;margin-top:12px;width:100%;
-    background:none;border:1px solid var(--border);
-    border-radius:8px;height:38px;color:var(--muted);
-    font-size:12px;cursor:pointer;
-  }
-  .logout-btn:hover{border-color:var(--accent);color:var(--accent)}
+  .info{margin-top:16px;font-size:11px;color:var(--muted);text-align:center}
 </style>
 </head>
 <body>
 <div class="card">
   <p class="logo">CamStreamer BR</p>
   <h1>Painel Remoto</h1>
-  <p class="sub">Camera2 RTMP · v5-CAMUI</p>
+  <p class="sub">Use o mesmo e-mail e senha do aplicativo</p>
 
-  <label for="pwd">Senha do painel</label>
+  <label for="email">E-mail</label>
+  <input type="email" id="email" placeholder="seu@email.com" autocomplete="email" />
+
+  <label for="pwd">Senha</label>
   <input type="password" id="pwd" placeholder="••••••••" autocomplete="current-password" />
-
-  <div class="hint" id="hint-first">
-    🔑 <strong>Primeiro acesso:</strong> a senha que você digitar agora será salva como senha permanente do painel.
-  </div>
 
   <button class="btn" id="btnLogin" onclick="doLogin()">ENTRAR</button>
   <p class="error" id="errMsg"></p>
-  <p class="badge-plan" id="badgePlan"></p>
-  <button class="logout-btn" id="btnLogout" onclick="window.location='/auth/logout'">Sair da sessão atual</button>
+  <p class="info">Camera2 RTMP · v5-CAMUI</p>
 </div>
 
 <script>
-  // Verifica se já existe sessão (cookie presente)
-  const hasCookie = document.cookie.includes('CAMSESSION=');
-  if (hasCookie) {
-    document.getElementById('btnLogout').style.display = 'block';
-  }
-
-  // Verifica se é primeiro acesso (sem senha cadastrada) via /api/plan retornando 401
-  async function checkFirstAccess() {
-    try {
-      const r = await fetch('/api/status');
-      if (r.status === 401) {
-        // Tenta GET /api/plan sem autenticação para saber se tem senha
-        // Se 401, pode ser primeiro acesso — mostramos a hint
-        document.getElementById('hint-first').style.display = 'block';
-      }
-    } catch(e) {}
-  }
-  checkFirstAccess();
-
   async function doLogin() {
+    const email  = document.getElementById('email').value.trim();
     const pwd    = document.getElementById('pwd').value.trim();
     const btn    = document.getElementById('btnLogin');
     const errMsg = document.getElementById('errMsg');
-    const badge  = document.getElementById('badgePlan');
 
-    if (!pwd) { errMsg.textContent = 'Digite a senha'; return; }
+    if (!email) { errMsg.textContent = 'Digite o e-mail'; return; }
+    if (!pwd)   { errMsg.textContent = 'Digite a senha';  return; }
 
     btn.disabled    = true;
     btn.textContent = 'Verificando...';
     errMsg.textContent = '';
-    badge.style.display = 'none';
 
     try {
       const resp = await fetch('/auth/login', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({password: pwd})
+        body: JSON.stringify({ email, password: pwd })
       });
       const data = await resp.json();
 
       if (resp.ok) {
-        badge.textContent = '✓ Plano: ' + data.plan;
-        badge.style.display = 'block';
         btn.textContent = 'Redirecionando...';
-        setTimeout(() => window.location.href = '/', 500);
+        setTimeout(() => window.location.href = '/', 400);
       } else {
-        errMsg.textContent = data.message || 'Senha incorreta';
+        errMsg.textContent = data.message || 'Credenciais inválidas';
         btn.disabled    = false;
         btn.textContent = 'ENTRAR';
       }
@@ -139,8 +101,10 @@
     }
   }
 
-  document.getElementById('pwd').addEventListener('keydown', e => {
-    if (e.key === 'Enter') doLogin();
+  ['email','pwd'].forEach(id => {
+    document.getElementById(id).addEventListener('keydown', e => {
+      if (e.key === 'Enter') doLogin();
+    });
   });
 </script>
 </body>

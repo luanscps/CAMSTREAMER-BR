@@ -5,10 +5,7 @@ import com.camera2rtsp.auth.SessionManager
 import fi.iki.elonen.NanoHTTPD
 
 /**
- * WebControlServer — v5-CAMUI + autenticação por cookie CAMSESSION
- *
- * Rotas públicas  : GET /auth/login  |  POST /auth/login  |  GET /auth/logout
- * Rotas protegidas: todo o resto — exige cookie CAMSESSION válido
+ * WebControlServer — v5-CAMUI + autenticação Supabase via cookie CAMSESSION
  */
 class WebControlServer(
     port: Int,
@@ -25,10 +22,25 @@ class WebControlServer(
         // ── Rotas públicas ─────────────────────────────────────────────────
         if (uri == "/auth/login") {
             return when (method) {
-                Method.GET  -> serveAsset("login.html", "text/html")
+                Method.GET -> {
+                    // Se já tem sessão válida → vai direto pro painel
+                    val token = extractSessionCookie(session)
+                    if (SessionManager.isValidWebSession(token)) {
+                        redirectTo("/")
+                    } else {
+                        serveAsset("login.html", "text/html")
+                    }
+                }
                 Method.POST -> WebControlAuth.handleLogin(session)
                 else        -> notFound()
             }
+        }
+        private fun redirectTo(path: String): Response {
+            val resp = newFixedLengthResponse(
+                Response.Status.REDIRECT, "text/plain", "Redirecionando..."
+            )
+            resp.addHeader("Location", path)
+            return resp
         }
         if (uri == "/auth/logout") return WebControlAuth.handleLogout()
 
@@ -44,16 +56,16 @@ class WebControlServer(
 
         // ── Rotas protegidas ───────────────────────────────────────────────
         return when {
-            uri == "/"                  -> serveAsset("index.html", "text/html")
-            uri == "/style.css"         -> serveAsset("style.css",  "text/css")
-            uri == "/app.js"            -> serveAsset("app.js",     "application/javascript")
-            uri == "/status"            -> WebControlApi.serveStatus(cameraController, context)
-            uri == "/api/status"        -> WebControlApi.serveStatus(cameraController, context)
-            uri == "/api/capabilities"  -> WebControlApi.serveCapabilities(cameraController, context)
-            uri == "/api/plan"          -> WebControlAuth.servePlan()
+            uri == "/"                 -> serveAsset("index.html", "text/html")
+            uri == "/style.css"        -> serveAsset("style.css",  "text/css")
+            uri == "/app.js"           -> serveAsset("app.js",     "application/javascript")
+            uri == "/status"           -> WebControlApi.serveStatus(cameraController, context)
+            uri == "/api/status"       -> WebControlApi.serveStatus(cameraController, context)
+            uri == "/api/capabilities" -> WebControlApi.serveCapabilities(cameraController, context)
+            uri == "/api/plan"         -> WebControlAuth.servePlan()
             uri == "/api/control" && method == Method.POST
-                                        -> WebControlApi.handleControl(session, cameraController)
-            else                        -> notFound()
+                                       -> WebControlApi.handleControl(session, cameraController)
+            else -> notFound()
         }
     }
 
