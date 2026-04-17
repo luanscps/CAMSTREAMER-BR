@@ -1,10 +1,9 @@
 package com.camera2rtsp.auth
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.util.UUID
 
 /**
@@ -42,7 +41,7 @@ object SessionManager {
     @Volatile var plan: String = "BASIC"
         private set
 
-    private var prefs: androidx.security.crypto.EncryptedSharedPreferences? = null
+    private var prefs: SharedPreferences? = null
 
     // ── Inicialização ───────────────────────────────────────────────────────
 
@@ -54,14 +53,13 @@ object SessionManager {
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
 
-        @Suppress("UNCHECKED_CAST")
         prefs = EncryptedSharedPreferences.create(
             context,
             PREFS_FILE,
             masterKey,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        ) as androidx.security.crypto.EncryptedSharedPreferences
+        )
 
         // Restaurar plano salvo localmente
         plan = prefs!!.getString(KEY_PLAN, "BASIC") ?: "BASIC"
@@ -120,19 +118,19 @@ object SessionManager {
 
     /**
      * Verifica a senha local da WebGUI.
-     * Retorna true se a senha bater OU se nenhuma senha foi cadastrada ainda.
+     * Retorna false se nenhuma senha foi cadastrada ainda (força configuração).
      */
     fun checkWebPassword(input: String): Boolean {
         val saved = requirePrefs().getString(KEY_WEB_PASSWORD, null)
-        if (saved.isNullOrBlank()) return false   // força cadastro de senha
+        if (saved.isNullOrBlank()) return false
         return saved == input
     }
 
     // ── WebGUI — Session Token (cookie CAMSESSION) ──────────────────────────
 
     /**
-     * Cria um novo webSessionToken com TTL de 8h e o persiste.
-     * @return o token gerado (deve ser enviado como cookie Set-Cookie)
+     * Cria um novo webSessionToken com TTL de 8h e persiste.
+     * @return o token gerado (enviado como cookie Set-Cookie pelo NanoHTTPD)
      */
     fun createWebSession(): String {
         val token   = UUID.randomUUID().toString()
@@ -145,7 +143,7 @@ object SessionManager {
     }
 
     /**
-     * Valida um token recebido no header/cookie da requisição NanoHTTPD.
+     * Valida token recebido no cookie da requisição NanoHTTPD.
      * @return true se o token é válido e não expirou
      */
     fun isValidWebSession(token: String): Boolean {
@@ -163,11 +161,10 @@ object SessionManager {
             .apply()
     }
 
-    // ── Helpers ─────────────────────────────────────────────────────────────
+    // ── Helper ───────────────────────────────────────────────────────────────
 
-    private fun requirePrefs(): android.content.SharedPreferences {
-        return checkNotNull(prefs) {
-            "SessionManager não foi inicializado. Chame SessionManager.init(context) no Application.onCreate()."
+    private fun requirePrefs(): SharedPreferences =
+        checkNotNull(prefs) {
+            "SessionManager não inicializado. Chame SessionManager.init(context) no Application.onCreate()."
         }
-    }
 }
