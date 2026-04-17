@@ -54,4 +54,12 @@ dependencies {
     // RootEncoder 2.7.2 — resolvido via includeBuild em settings.gradle
     // O includeBuild substitui essa coordenada pelo modulo local ../RootEncoder
     implementation("com.github.pedroSG94.RootEncoder:library:2.7.2")
+
+    // Armazenamento seguro (EncryptedSharedPreferences) para sub_license_key
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+    // HTTP client para chamar o camui-panel (/api/activate, /api/license/validate)
+    implementation("com.squareup.retrofit2:retrofit:2.11.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.11.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 }
