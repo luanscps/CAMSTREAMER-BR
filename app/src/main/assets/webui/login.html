@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>CamStreamer BR — Login</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0d0d0d;--surface:#141414;--border:#222;
+    --text:#f0f0f0;--muted:#666;--accent:#e53935;
+    --accent-hover:#c62828;--radius:10px;
+  }
+  body{
+    background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    display:flex;align-items:center;justify-content:center;
+    min-height:100vh;padding:20px;
+  }
+  .card{
+    background:var(--surface);border:1px solid var(--border);
+    border-radius:var(--radius);padding:40px 32px;
+    width:100%;max-width:360px;
+  }
+  .logo{font-size:11px;letter-spacing:.18em;color:var(--muted);
+        text-align:center;margin-bottom:6px;text-transform:uppercase}
+  h1{font-size:19px;font-weight:700;text-align:center;margin-bottom:4px}
+  .sub{font-size:12px;color:var(--muted);text-align:center;margin-bottom:32px}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;margin-top:20px}
+  input[type=password]{
+    width:100%;height:44px;background:#0d0d0d;
+    border:1px solid var(--border);border-radius:8px;
+    color:var(--text);font-size:14px;padding:0 14px;
+    outline:none;transition:border-color .2s;
+  }
+  input[type=password]:focus{border-color:var(--accent)}
+  .btn{
+    margin-top:24px;width:100%;height:44px;
+    background:var(--accent);border:none;border-radius:8px;
+    color:#fff;font-size:14px;font-weight:700;
+    letter-spacing:.06em;cursor:pointer;transition:background .2s;
+  }
+  .btn:hover{background:var(--accent-hover)}
+  .btn:disabled{background:#333;color:#666;cursor:not-allowed}
+  .error{min-height:18px;margin-top:12px;
+         font-size:12px;color:#ff5252;text-align:center}
+  .hint{
+    margin-top:20px;padding:12px;border-radius:8px;
+    background:#1a1400;border:1px solid #3a2e00;
+    font-size:11px;color:#b0900a;line-height:1.5;display:none;
+  }
+  .badge-plan{
+    display:none;margin-top:14px;text-align:center;
+    font-size:12px;color:#4caf50;
+  }
+  .logout-btn{
+    display:none;margin-top:12px;width:100%;
+    background:none;border:1px solid var(--border);
+    border-radius:8px;height:38px;color:var(--muted);
+    font-size:12px;cursor:pointer;
+  }
+  .logout-btn:hover{border-color:var(--accent);color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="card">
+  <p class="logo">CamStreamer BR</p>
+  <h1>Painel Remoto</h1>
+  <p class="sub">Camera2 RTMP · v5-CAMUI</p>
+
+  <label for="pwd">Senha do painel</label>
+  <input type="password" id="pwd" placeholder="••••••••" autocomplete="current-password" />
+
+  <div class="hint" id="hint-first">
+    🔑 <strong>Primeiro acesso:</strong> a senha que você digitar agora será salva como senha permanente do painel.
+  </div>
+
+  <button class="btn" id="btnLogin" onclick="doLogin()">ENTRAR</button>
+  <p class="error" id="errMsg"></p>
+  <p class="badge-plan" id="badgePlan"></p>
+  <button class="logout-btn" id="btnLogout" onclick="window.location='/auth/logout'">Sair da sessão atual</button>
+</div>
+
+<script>
+  // Verifica se já existe sessão (cookie presente)
+  const hasCookie = document.cookie.includes('CAMSESSION=');
+  if (hasCookie) {
+    document.getElementById('btnLogout').style.display = 'block';
+  }
+
+  // Verifica se é primeiro acesso (sem senha cadastrada) via /api/plan retornando 401
+  async function checkFirstAccess() {
+    try {
+      const r = await fetch('/api/status');
+      if (r.status === 401) {
+        // Tenta GET /api/plan sem autenticação para saber se tem senha
+        // Se 401, pode ser primeiro acesso — mostramos a hint
+        document.getElementById('hint-first').style.display = 'block';
+      }
+    } catch(e) {}
+  }
+  checkFirstAccess();
+
+  async function doLogin() {
+    const pwd    = document.getElementById('pwd').value.trim();
+    const btn    = document.getElementById('btnLogin');
+    const errMsg = document.getElementById('errMsg');
+    const badge  = document.getElementById('badgePlan');
+
+    if (!pwd) { errMsg.textContent = 'Digite a senha'; return; }
+
+    btn.disabled    = true;
+    btn.textContent = 'Verificando...';
+    errMsg.textContent = '';
+    badge.style.display = 'none';
+
+    try {
+      const resp = await fetch('/auth/login', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({password: pwd})
+      });
+      const data = await resp.json();
+
+      if (resp.ok) {
+        badge.textContent = '✓ Plano: ' + data.plan;
+        badge.style.display = 'block';
+        btn.textContent = 'Redirecionando...';
+        setTimeout(() => window.location.href = '/', 500);
+      } else {
+        errMsg.textContent = data.message || 'Senha incorreta';
+        btn.disabled    = false;
+        btn.textContent = 'ENTRAR';
+      }
+    } catch(e) {
+      errMsg.textContent = 'Erro de conexão com o dispositivo';
+      btn.disabled    = false;
+      btn.textContent = 'ENTRAR';
+    }
+  }
+
+  document.getElementById('pwd').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doLogin();
+  });
+</script>
+</body>
+</html>
