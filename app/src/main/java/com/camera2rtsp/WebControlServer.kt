@@ -4,9 +4,6 @@ import android.content.Context
 import com.camera2rtsp.auth.SessionManager
 import fi.iki.elonen.NanoHTTPD
 
-/**
- * WebControlServer — v5-CAMUI + autenticação Supabase via cookie CAMSESSION
- */
 class WebControlServer(
     port: Int,
     private val cameraController: Camera2Controller,
@@ -19,11 +16,10 @@ class WebControlServer(
         val uri    = session.uri
         val method = session.method
 
-        // ── Rotas públicas ─────────────────────────────────────────────────
+        // Rotas de autenticacao
         if (uri == "/auth/login") {
             return when (method) {
                 Method.GET -> {
-                    // Se já tem sessão válida → vai direto pro painel
                     val token = extractSessionCookie(session)
                     if (SessionManager.isValidWebSession(token)) {
                         redirectTo("/")
@@ -35,26 +31,19 @@ class WebControlServer(
                 else        -> notFound()
             }
         }
-        private fun redirectTo(path: String): Response {
-            val resp = newFixedLengthResponse(
-                Response.Status.REDIRECT, "text/plain", "Redirecionando..."
-            )
-            resp.addHeader("Location", path)
-            return resp
-        }
         if (uri == "/auth/logout") return WebControlAuth.handleLogout()
 
-        // ── Middleware: verificar cookie CAMSESSION ────────────────────────
+        // Middleware: verificar cookie CAMSESSION
         val token = extractSessionCookie(session)
         if (!SessionManager.isValidWebSession(token)) {
             return if (uri.startsWith("/api/") || uri == "/status") {
                 unauthorizedJson()
             } else {
-                redirectToLogin()
+                redirectTo("/auth/login", clearCookie = true)
             }
         }
 
-        // ── Rotas protegidas ───────────────────────────────────────────────
+        // Rotas protegidas
         return when {
             uri == "/"                 -> serveAsset("index.html", "text/html")
             uri == "/style.css"        -> serveAsset("style.css",  "text/css")
@@ -68,8 +57,6 @@ class WebControlServer(
             else -> notFound()
         }
     }
-
-    // ── Helpers ────────────────────────────────────────────────────────────
 
     private fun extractSessionCookie(session: IHTTPSession): String {
         val header = session.headers["cookie"] ?: return ""
@@ -85,11 +72,14 @@ class WebControlServer(
             WebControlHtml.serveAsset(context, filename)
         )
 
-    private fun redirectToLogin(): Response {
+    private fun redirectTo(path: String, clearCookie: Boolean = false): Response {
         val resp = newFixedLengthResponse(
             Response.Status.REDIRECT, "text/plain", "Redirecionando..."
         )
-        resp.addHeader("Location", "/auth/login")
+        if (clearCookie) {
+            resp.addHeader("Set-Cookie", "CAMSESSION=; Path=/; Max-Age=0")
+        }
+        resp.addHeader("Location", path)
         return resp
     }
 
