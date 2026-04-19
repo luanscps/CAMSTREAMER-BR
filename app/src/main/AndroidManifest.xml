@@ -19,6 +19,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
+    <!-- Android 14+: tipo para serviços de dados/heartbeat -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
     <!-- Android 13+: permissão para mostrar notificação -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
@@ -75,11 +78,29 @@
             android:screenOrientation="fullSensor"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode" />
 
-        <!-- ForegroundService que mantém câmera+RTSP vivos com tela desligada -->
+        <!-- ForegroundService que mantém câmera+RTMP vivos com tela desligada -->
         <service
             android:name=".StreamingService"
             android:exported="false"
             android:foregroundServiceType="camera|microphone" />
+
+        <!--
+            Heartbeat periódico: envia last_seen + telemetria ao painel.
+            Roda em background como foreground service tipo dataSync.
+        -->
+        <service
+            android:name=".HeartbeatService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!--
+            Polling de comandos remotos (start/stop stream, etc.).
+            Roda em background como foreground service tipo dataSync.
+        -->
+        <service
+            android:name=".RemoteCommandsService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
     </application>
 
