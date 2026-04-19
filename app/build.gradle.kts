@@ -39,20 +39,19 @@ android {
 }
 
 dependencies {
-// kotlinx-serialization
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+    // kotlinx-serialization
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
-// Ktor engine para Android (requerido pelo Supabase SDK)
-    implementation("io.ktor:ktor-client-android:2.3.12")
-    implementation("io.ktor:ktor-client-core:2.3.12")
-    implementation("io.ktor:ktor-client-content-negotiation:2.3.12")
-    implementation("io.ktor:ktor-serialization-kotlinx-json:2.3.12")
+    // Ktor 3.x — obrigatório para Supabase BOM 3.x
+    implementation("io.ktor:ktor-client-android:3.1.3")
+    implementation("io.ktor:ktor-client-core:3.1.3")
+    implementation("io.ktor:ktor-client-content-negotiation:3.1.3")
+    implementation("io.ktor:ktor-serialization-kotlinx-json:3.1.3")
 
-// Supabase — group ID CORRETO: io.github.jan-tennert.supabase
+    // Supabase BOM 3.x — gerencia versões dos módulos automaticamente
     implementation(platform("io.github.jan-tennert.supabase:bom:3.1.4"))
     implementation("io.github.jan-tennert.supabase:postgrest-kt")
     implementation("io.github.jan-tennert.supabase:auth-kt")
-
 
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
@@ -68,13 +67,12 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
     // RootEncoder 2.7.2 — resolvido via includeBuild em settings.gradle
-    // O includeBuild substitui essa coordenada pelo modulo local ../RootEncoder
     implementation("com.github.pedroSG94.RootEncoder:library:2.7.2")
 
-    // Armazenamento seguro (EncryptedSharedPreferences) para sub_license_key
+    // Armazenamento seguro (EncryptedSharedPreferences)
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
-    // HTTP client para chamar o camui-panel (/api/activate, /api/license/validate)
+    // HTTP client para chamar o camui-panel
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
     implementation("com.squareup.retrofit2:converter-gson:2.11.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
