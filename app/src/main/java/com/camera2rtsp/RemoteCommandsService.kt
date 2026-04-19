@@ -2,6 +2,7 @@ package br.camui.remote
 
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.query.Order
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -42,7 +43,7 @@ class RemoteCommandsService(
                     eq("device_id", deviceId)
                     eq("status", "pending")
                 }
-                order("issued_at")
+                order("issued_at", Order.ASCENDING)
                 limit(10)
             }
             .decodeList<RemoteCommandRow>()
