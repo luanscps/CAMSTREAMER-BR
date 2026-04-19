@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.serialization") version "1.9.23"
 }
 
 android {
@@ -38,6 +39,19 @@ android {
 }
 
 dependencies {
+    // Ktor engine para Android (necessário pelo Supabase)
+    implementation("io.ktor:ktor-client-android:2.3.12")
+    implementation("io.ktor:ktor-client-core:2.3.12")
+    implementation("io.ktor:ktor-client-content-negotiation:2.3.12")
+    implementation("io.ktor:ktor-serialization-kotlinx-json:2.3.12")
+
+// kotlinx-serialization
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+
+// Supabase Kotlin SDK
+    implementation(platform("io.github.jan-tennermann:supabase-kt-bom:2.6.1"))
+    implementation("io.github.jan-tennermann:postgrest-kt")
+    implementation("io.github.jan-tennermann:gotrue-kt")
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")
