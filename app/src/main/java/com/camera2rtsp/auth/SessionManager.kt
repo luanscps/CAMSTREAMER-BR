@@ -6,35 +6,19 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import java.util.UUID
 
-/**
- * SessionManager — Singleton central de autenticação.
- *
- * Responsabilidades:
- *  - Persistir sub_license_key em EncryptedSharedPreferences
- *  - Armazenar PlanFeatures em memória após validação
- *  - Gerar e validar webSessionToken (para o NanoHTTPD na porta 8080)
- *  - Gerenciar senha local da WebGUI
- *
- * Uso:
- *   SessionManager.init(context)           // no Application.onCreate()
- *   SessionManager.isLoggedIn()            // verifica se tem chave salva
- *   SessionManager.features                // PlanFeatures atual
- *   SessionManager.isValidWebSession(tok)  // middleware do NanoHTTPD
- */
 object SessionManager {
 
-    // ── Chaves de preferências ──────────────────────────────────────────────
     private const val PREFS_FILE          = "camstreamer_secure_prefs"
     private const val KEY_SUB_LICENSE     = "sub_license_key"
     private const val KEY_WEB_PASSWORD    = "web_gui_password"
     private const val KEY_WEB_SESSION_TOK = "web_session_token"
     private const val KEY_WEB_SESSION_EXP = "web_session_expires"
     private const val KEY_PLAN            = "plan_name"
+    private const val KEY_APP_VERSION     = "app_version"
+    private const val KEY_SUPABASE_TOKEN  = "supabase_token"
 
-    /** TTL do webSessionToken em milissegundos (8 horas) */
     private const val WEB_SESSION_TTL_MS = 8 * 60 * 60 * 1000L
 
-    // ── Estado em memória ───────────────────────────────────────────────────
     @Volatile var features: PlanFeatures = PlanFeatures.basic()
         private set
 
@@ -43,11 +27,6 @@ object SessionManager {
 
     private var prefs: SharedPreferences? = null
 
-    // ── Inicialização ───────────────────────────────────────────────────────
-
-    /**
-     * Deve ser chamado no Application.onCreate() antes de qualquer uso.
-     */
     fun init(context: Context) {
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
@@ -61,12 +40,11 @@ object SessionManager {
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         )
 
-        // Restaurar plano salvo localmente
         plan = prefs!!.getString(KEY_PLAN, "BASIC") ?: "BASIC"
         if (plan == "PRO") features = PlanFeatures.pro()
     }
 
-    // ── sub_license_key ─────────────────────────────────────────────────────
+    // ── sub_license_key ──────────────────────────────────────────────────────
 
     fun saveSubLicenseKey(key: String) {
         requirePrefs().edit().putString(KEY_SUB_LICENSE, key).apply()
@@ -84,12 +62,14 @@ object SessionManager {
             .remove(KEY_WEB_SESSION_TOK)
             .remove(KEY_WEB_SESSION_EXP)
             .remove(KEY_PLAN)
+            .remove(KEY_APP_VERSION)
+            .remove(KEY_SUPABASE_TOKEN)
             .apply()
         features = PlanFeatures.basic()
         plan = "BASIC"
     }
 
-    // ── Atualizar features após validação ───────────────────────────────────
+    // ── Features ─────────────────────────────────────────────────────────────
 
     fun setFeaturesFromResponse(response: LicenseValidateResponse) {
         features = response.features ?: PlanFeatures.basic()
@@ -103,12 +83,26 @@ object SessionManager {
         requirePrefs().edit().putString(KEY_PLAN, plan).apply()
     }
 
-    // ── WebGUI — Senha local ────────────────────────────────────────────────
+    // ── App Version ──────────────────────────────────────────────────────────
 
-    /**
-     * Define a senha local da WebGUI (definida pelo usuário na MainActivity).
-     * Não tem relação com a senha do Supabase.
-     */
+    fun saveAppVersion(version: String) {
+        requirePrefs().edit().putString(KEY_APP_VERSION, version).apply()
+    }
+
+    fun getAppVersion(): String? =
+        requirePrefs().getString(KEY_APP_VERSION, null)
+
+    // ── Supabase Token ───────────────────────────────────────────────────────
+
+    fun saveSupabaseToken(token: String) {
+        requirePrefs().edit().putString(KEY_SUPABASE_TOKEN, token).apply()
+    }
+
+    fun getSupabaseToken(): String? =
+        requirePrefs().getString(KEY_SUPABASE_TOKEN, null)
+
+    // ── WebGUI — Senha local ─────────────────────────────────────────────────
+
     fun setWebPassword(password: String) {
         requirePrefs().edit().putString(KEY_WEB_PASSWORD, password).apply()
     }
@@ -116,22 +110,14 @@ object SessionManager {
     fun hasWebPassword(): Boolean =
         !requirePrefs().getString(KEY_WEB_PASSWORD, null).isNullOrBlank()
 
-    /**
-     * Verifica a senha local da WebGUI.
-     * Retorna false se nenhuma senha foi cadastrada ainda (força configuração).
-     */
     fun checkWebPassword(input: String): Boolean {
         val saved = requirePrefs().getString(KEY_WEB_PASSWORD, null)
         if (saved.isNullOrBlank()) return false
         return saved == input
     }
 
-    // ── WebGUI — Session Token (cookie CAMSESSION) ──────────────────────────
+    // ── WebGUI — Session Token ───────────────────────────────────────────────
 
-    /**
-     * Cria um novo webSessionToken com TTL de 8h e persiste.
-     * @return o token gerado (enviado como cookie Set-Cookie pelo NanoHTTPD)
-     */
     fun createWebSession(): String {
         val token   = UUID.randomUUID().toString()
         val expires = System.currentTimeMillis() + WEB_SESSION_TTL_MS
@@ -142,10 +128,6 @@ object SessionManager {
         return token
     }
 
-    /**
-     * Valida token recebido no cookie da requisição NanoHTTPD.
-     * @return true se o token é válido e não expirou
-     */
     fun isValidWebSession(token: String): Boolean {
         if (token.isBlank()) return false
         val saved   = requirePrefs().getString(KEY_WEB_SESSION_TOK, null) ?: return false
@@ -153,7 +135,6 @@ object SessionManager {
         return token == saved && System.currentTimeMillis() < expires
     }
 
-    /** Invalida o webSessionToken (ex: após logout ou licença expirada). */
     fun invalidateWebSession() {
         requirePrefs().edit()
             .remove(KEY_WEB_SESSION_TOK)
@@ -161,10 +142,10 @@ object SessionManager {
             .apply()
     }
 
-    // ── Helper ───────────────────────────────────────────────────────────────
+    // ── Helper ────────────────────────────────────────────────────────────────
 
     private fun requirePrefs(): SharedPreferences =
         checkNotNull(prefs) {
-            "SessionManager não inicializado. Chame SessionManager.init(context) no Application.onCreate()."
+            "SessionManager nao inicializado. Chame SessionManager.init(context) no Application.onCreate()."
         }
 }

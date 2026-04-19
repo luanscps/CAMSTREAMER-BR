@@ -30,17 +30,6 @@ data class SupabaseAuthResponse(
     @SerializedName("msg")           val msg: String?          = null
 )
 
-data class ActivateRequest(
-    @SerializedName("android_id")       val androidId: String,
-    @SerializedName("device_name")      val deviceName: String?    = null,
-    @SerializedName("device_brand")     val deviceBrand: String?   = null,
-    @SerializedName("device_model")     val deviceModel: String?   = null,
-    @SerializedName("device_hardware")  val deviceHardware: String? = null,
-    @SerializedName("android_version")  val androidVersion: String? = null,
-    @SerializedName("sdk_int")          val sdkInt: Int?           = null,
-    @SerializedName("app_version")      val appVersion: String?    = null
-)
-
 // ── Supabase Auth API (token endpoint) ───────────────────────────────────────
 
 interface SupabaseAuthService {
@@ -82,8 +71,8 @@ interface LicenseApiService {
 object ApiClient {
 
     const val PANEL_BASE_URL    = "https://camui-panel.vercel.app/"
-    const val SUPABASE_URL      = "https://rqjxvzzfgoagcsxihdwe.supabase.co"  // substitua pelo seu
-    const val SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJxanh2enpmZ29hZ2NzeGloZHdlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzMjQ0MDAsImV4cCI6MjA4ODkwMDQwMH0.khbppeoBGg1DPaGveTpT7hAetp-uAhAXigqE4LpQrGg"             // substitua pelo seu
+    const val SUPABASE_URL      = "https://rqjxvzzfgoagcsxihdwe.supabase.co"
+    const val SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJxanh2enpmZ29hZ2NzeGloZHdlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzMjQ0MDAsImV4cCI6MjA4ODkwMDQwMH0.khbppeoBGg1DPaGveTpT7hAetp-uAhAXigqE4LpQrGg"
 
     val licenseApi: LicenseApiService by lazy {
         Retrofit.Builder()
