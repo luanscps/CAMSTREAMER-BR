@@ -4,24 +4,24 @@ import android.content.Context
 import com.camera2rtsp.auth.SessionManager
 import fi.iki.elonen.NanoHTTPD
 
-/**
+/*
  * WebControlServer (NanoHTTPD)
  *
- * Inicia ANTES do login Supabase — rotas públicas são servidas sem cookie.
- * Apenas as rotas protegidas exigem sessão CAMSESSION válida.
+ * Inicia ANTES do login Supabase - rotas publicas sao servidas sem cookie.
+ * Apenas as rotas protegidas exigem sessao CAMSESSION valida.
  *
- * Rotas públicas (sem autenticação):
- *   GET  /auth/login   → serve login.html direto (NUNCA redirect para evitar loop)
- *   POST /auth/login   → processa credenciais web
- *   GET  /auth/logout  → limpa cookie, redireciona para /auth/login
- *   GET  /style.css    → CSS público
- *   GET  /app.js       → JS público
+ * Rotas publicas (sem autenticacao):
+ *   GET  /auth/login   -> serve login.html direto (NUNCA redirect para evitar loop)
+ *   POST /auth/login   -> processa credenciais web
+ *   GET  /auth/logout  -> limpa cookie, redireciona para /auth/login
+ *   GET  /style.css    -> CSS publico
+ *   GET  /app.js       -> JS publico
  *
  * Rotas protegidas (exigem cookie CAMSESSION):
- *   GET  /             → index.html
- *   GET  /status       → status JSON
- *   GET  /api/*        → APIs JSON
- *   POST /api/control  → controle câmera
+ *   GET  /             -> index.html
+ *   GET  /status       -> status JSON
+ *   GET  /api/*        -> APIs JSON
+ *   POST /api/control  -> controle camera
  *
  * Fix issue #5: / sem auth serve login.html DIRETO (sem redirect)
  * eliminando o loop ERR_TOO_MANY_REDIRECTS.
@@ -38,9 +38,9 @@ class WebControlServer(
         val uri    = session.uri
         val method = session.method
 
-        // ── Rotas públicas — sem verificação de cookie ────────────────────────
+        // Rotas publicas - sem verificacao de cookie
 
-        // Assets CSS/JS sempre públicos (necessários para renderizar login.html)
+        // Assets CSS/JS sempre publicos (necessarios para renderizar login.html)
         if (uri == "/style.css") return serveAsset("style.css", "text/css")
         if (uri == "/app.js")    return serveAsset("app.js",    "application/javascript")
 
@@ -60,13 +60,13 @@ class WebControlServer(
         // Logout: limpa cookie e redireciona para login UMA VEZ
         if (uri == "/auth/logout") return WebControlAuth.handleLogout()
 
-        // ── Middleware: verifica cookie para rotas protegidas ─────────────────
+        // Middleware: verifica cookie para rotas protegidas
 
         val token = extractSessionCookie(session)
         val authenticated = SessionManager.isValidWebSession(token)
 
-        // Raiz sem autenticação: serve login.html DIRETO (fix issue #5)
-        // Evita o loop: / → redirect /auth/login → / → loop infinito
+        // Raiz sem autenticacao: serve login.html DIRETO (fix issue #5)
+        // Evita o loop: / -> redirect /auth/login -> / -> loop infinito
         if (uri == "/" && !authenticated) {
             return serveAsset("login.html", "text/html")
         }
@@ -81,7 +81,7 @@ class WebControlServer(
             }
         }
 
-        // ── Rotas protegidas ──────────────────────────────────────────────────
+        // Rotas protegidas
         return when {
             uri == "/"                 -> serveAsset("index.html", "text/html")
             uri == "/status"           -> WebControlApi.serveStatus(cameraController, context)
@@ -94,7 +94,7 @@ class WebControlServer(
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    // Helpers
 
     private fun extractSessionCookie(session: IHTTPSession): String {
         val header = session.headers["cookie"] ?: return ""
