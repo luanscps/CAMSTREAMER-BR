@@ -13,10 +13,10 @@ var FRAME_STOPS=['1/15','1/24','1/30','1/60'];
 
 // Label bonito para resoluções comuns de vídeo
 var RES_LABELS={
-  '7680x4320':'8K','3840x2160':'4K','4032x2268':'4K (4:3)','4608x2592':'4K UW',
-  '2560x1440':'2K','1920x1080':'1080p','1920x1440':'1080p 4:3',
+  '7680x4320':'8K','3840x2160':'4K','4032x2268':'4K','4608x2592':'4K',
+  '2560x1440':'2K','1920x1080':'1080p','1920x1440':'1080p',
   '1280x720':'720p','960x540':'540p','854x480':'480p',
-  '640x360':'360p','3840x2160':'4K'
+  '640x360':'360p'
 };
 // Resoluções válidas para streaming (descarta miniaturas <540p por padrão)
 var RES_MIN_WIDTH=640;
@@ -64,29 +64,106 @@ function debounce(fn,delay,timerRef){
   };
 }
 
-// Label legível para resolução
-function resLabel(res){
-  if(RES_LABELS[res])return RES_LABELS[res]+'\n'+res;
-  // Tenta gerar label por altura
-  var parts=res.split('x');
-  if(parts.length===2){
-    var h=parseInt(parts[1]);
-    if(h>=2160)return '4K\n'+res;
-    if(h>=1440)return '2K\n'+res;
-    if(h>=1080)return '1080p\n'+res;
-    if(h>=720)return '720p\n'+res;
-    if(h>=540)return '540p\n'+res;
-    if(h>=480)return '480p\n'+res;
-    return res;
+function parseResolution(res){
+  var parts=String(res||'').split('x');
+  if(parts.length!==2)return null;
+  var w=parseInt(parts[0],10);
+  var h=parseInt(parts[1],10);
+  if(!w||!h)return null;
+  return { raw:res, w:w, h:h, pixels:w*h };
+}
+
+function getResolutionTierLabel(res){
+  var p=parseResolution(res);
+  if(!p)return res;
+  var h=p.h;
+  var w=p.w;
+  if(w>=7680||h>=4320)return '8K';
+  if(w>=3840||h>=2160)return '4K';
+  if(w>=2560||h>=1440)return '2K';
+  if(w>=1920||h>=1080)return '1080p';
+  if(w>=1280||h>=720)return '720p';
+  if(h>=540)return '540p';
+  if(h>=480)return '480p';
+  return res;
+}
+
+function simplifyResolutions(resolutions,currentRes){
+  var filtered=filterStreamRes(resolutions);
+  var groups={};
+  var order=['8K','4K','2K','1080p','720p','540p','480p'];
+  for(var i=0;i<filtered.length;i++){
+    var r=filtered[i];
+    var p=parseResolution(r);
+    if(!p)continue;
+    var tier=getResolutionTierLabel(r);
+    if(!groups[tier])groups[tier]=[];
+    groups[tier].push(p);
   }
+
+  var out=[];
+  for(var j=0;j<order.length;j++){
+    var tierName=order[j];
+    var items=groups[tierName];
+    if(!items||!items.length)continue;
+
+    var chosen=items[0];
+    var hasCurrent=false;
+    for(var k=0;k<items.length;k++){
+      if(items[k].raw===currentRes){
+        chosen=items[k];
+        hasCurrent=true;
+        break;
+      }
+      if(items[k].pixels>chosen.pixels){
+        chosen=items[k];
+      }
+    }
+
+    out.push({
+      tier:tierName,
+      raw:chosen.raw,
+      w:chosen.w,
+      h:chosen.h,
+      isCurrent:hasCurrent
+    });
+  }
+
+  if(currentRes){
+    var alreadyIncluded=false;
+    for(var x=0;x<out.length;x++){
+      if(out[x].raw===currentRes){alreadyIncluded=true;break;}
+    }
+    if(!alreadyIncluded){
+      var cp=parseResolution(currentRes);
+      if(cp){
+        out.push({
+          tier:getResolutionTierLabel(currentRes),
+          raw:currentRes,
+          w:cp.w,
+          h:cp.h,
+          isCurrent:true
+        });
+      }
+    }
+  }
+
+  return out;
+}
+
+// Label legível para resolução resumida
+function resLabel(res){
+  var tier=getResolutionTierLabel(res);
+  if(tier!==res)return tier;
+  if(RES_LABELS[res])return RES_LABELS[res];
   return res;
 }
 
 // Filtra resoluções úteis para streaming (descarta miniaturas)
 function filterStreamRes(resolutions){
   return (resolutions||[]).filter(function(r){
-    var parts=r.split('x');
-    return parts.length===2&&parseInt(parts[0])>=RES_MIN_WIDTH;
+    var parts=String(r).split('x');
+    return parts.length===2&&parseInt(parts[0],10)>=RES_MIN_WIDTH;
   });
 }
 
@@ -146,9 +223,7 @@ function buildCameraButtons(cameras,currentId){
   var html='';
   for(var i=0;i<cameras.length;i++){
     var c=cameras[i];
-    // FIX: usa c.name (API retorna "name") e filtra câmera depth/ToF
     if(c.is_depth)continue;
-    // Nome real da câmera ("Wide", "Frontal", "Ultra Wide", etc)
     var lbl=c.name||('Cam '+c.camera_id);
     var active=(String(c.camera_id)===String(currentId));
     html+='<button data-cam="'+c.camera_id+'"'+(active?' class="active"':'')+
@@ -167,27 +242,26 @@ function switchCamera(camId,btn){
 function buildResolutionButtons(resolutions,currentRes){
   var container=document.getElementById('btngroup-resolution');
   if(!container)return;
-  // FIX: filtra resoluções muito pequenas para streaming
-  var filtered=filterStreamRes(resolutions);
-  if(!filtered.length){
+
+  var simplified=simplifyResolutions(resolutions,currentRes);
+  if(!simplified.length){
     container.innerHTML='<span style="color:var(--muted)">Nenhuma resolução disponível</span>';
     return;
   }
+
   var html='';
-  for(var i=0;i<filtered.length;i++){
-    var r=filtered[i];
-    var active=(r===currentRes);
-    // Label legível: "1080p\n1920x1080" — exibe em duas linhas via CSS white-space:pre
-    var lbl=resLabel(r);
-    html+='<button data-res="'+r+'" style="white-space:pre;line-height:1.2"'+(active?' class="active"':'')+
-          ' onclick="setResolution(\''+r+'\',this)">'+lbl+'</button>';
+  for(var i=0;i<simplified.length;i++){
+    var item=simplified[i];
+    var active=(item.raw===currentRes);
+    var lbl=resLabel(item.raw);
+    html+='<button data-res="'+item.raw+'" title="'+item.raw+'"'+(active?' class="active"':'')+
+          ' onclick="setResolution(\''+item.raw+'\',this)">'+lbl+'</button>';
   }
   container.innerHTML=html;
 }
 function buildFpsButtons(fpsRanges,currentFps){
   var container=document.getElementById('btngroup-fps');
   if(!container)return;
-  // Candidatos realistas para streaming; 60/120/240 só se hardware suportar
   var candidates=[15,24,30,60,120,240];
   var html='';
   for(var i=0;i<candidates.length;i++){
@@ -195,11 +269,10 @@ function buildFpsButtons(fpsRanges,currentFps){
     var supported=false;
     if(fpsRanges){
       for(var j=0;j<fpsRanges.length;j++){
-        // fps_range é [min,max] — fps precisa ser >= min E <= max
         if(fps>=fpsRanges[j][0]&&fps<=fpsRanges[j][1]){supported=true;break;}
       }
     }
-    if(!supported)continue; // Oculta completamente se o hardware não suporta
+    if(!supported)continue;
     var active=(fps===currentFps);
     html+='<button data-fps="'+fps+'"'+(active?' class="active"':'')+
           ' onclick="setFps('+fps+',this)">'+fps+'fps</button>';
@@ -207,7 +280,7 @@ function buildFpsButtons(fpsRanges,currentFps){
   container.innerHTML=html||'<span style="color:var(--muted)">-</span>';
 }
 function setResolution(res,btn){
-  sendControl({resolution:res},btn,res);
+  sendControl({resolution:res},btn,resLabel(res));
   markActive('data-res',res);
 }
 function setFps(fps,btn){
@@ -223,7 +296,6 @@ function updateZoom(v){
 }
 function setZoomPreset(v){document.getElementById('zoom').value=v;updateZoom(v);}
 
-// Zoom Óptico
 function buildOpticalZoomButtons(lenses,currentLens){
   var card=document.getElementById('card-optical-zoom');
   var container=document.getElementById('btngroup-optical-zoom');
@@ -279,7 +351,7 @@ function buildWBButtons(modes,currentMode){
   var html='';
   for(var i=0;i<modes.length;i++){
     var m=modes[i];
-    if(m==='off')continue; // off = manual RGGB, controlado no card próprio
+    if(m==='off')continue;
     var active=(m===currentMode);
     html+='<button data-wb="'+m+'"'+(active?' class="active"':'')+
           ' onclick="setWBMode(\''+m+'\',this)">'+(labels[m]||m)+'</button>';
@@ -392,21 +464,13 @@ function applyLatencyMin(btn){
 function applyCameraCapabilities(camId){
   var cap=getCap(camId);
   if(!cap)return;
-  // FIX: usa available_resolutions (campo real da API) + resolucao atual do status
   buildResolutionButtons(cap.available_resolutions||[],cap.current_resolution);
-  // FPS via ranges do hardware
   buildFpsButtons(cap.fps_ranges||null,cap.current_fps);
-  // Foco — usa supported_af_modes (campo real)
   buildFocusModeButtons(cap.supported_af_modes||cap.af_modes||[],cap.current_af_mode);
-  // WB — usa supported_awb_modes (campo real)
   buildWBButtons(cap.supported_awb_modes||cap.awb_modes||[],cap.current_wb);
-  // OIS
   updateOISCapability(cap.has_ois||false);
-  // Zoom óptico (multilente)
   buildOpticalZoomButtons(cap.lenses||null,cap.current_focal_length);
-  // Processamento de imagem (manual sensor = supports_manual_post_processing)
   showCard('card-postproc',cap.supports_manual_post_processing||cap.has_postproc||false);
-  // ISO range do hardware
   if(cap.iso_range){
     var minIso=cap.iso_range[0];var maxIso=cap.iso_range[1];
     var labels=document.querySelector('#card-iso .rlabels');
@@ -419,7 +483,6 @@ function setText(id,val){var el=document.getElementById(id);if(el)el.textContent
 function setClass(id,cls){var el=document.getElementById(id);if(el){el.className='mc-val';if(cls)el.classList.add(cls);}}
 
 function applyStatus(s){
-  // Status bar
   var dot=document.getElementById('dot-stream');
   var lbl=document.getElementById('lbl-stream');
   if(s.streaming){
@@ -430,17 +493,15 @@ function applyStatus(s){
     if(lbl)lbl.textContent='Parado';
   }
   setText('lbl-cam',s.camera_id);
-  setText('lbl-res',s.resolution);
+  setText('lbl-res',s.resolution ? resLabel(s.resolution) : s.resolution);
   setText('lbl-br',s.bitrate_kbps);
 
-  // Latência
   var latEl=document.getElementById('lbl-lat');
   if(latEl&&s.latency_ms!==undefined){
     latEl.textContent=s.latency_ms+'ms';
     latEl.className=s.latency_ms<100?'lat-ok':s.latency_ms<300?'lat-warn':'lat-bad';
   }
 
-  // Info pills câmera
   setText('info-focusmode',s.focus_mode);
   setText('info-focusdist',s.focus_dist!=null?s.focus_dist.toFixed(2)+'D':null);
   setText('info-iso',s.iso);
@@ -457,32 +518,26 @@ function applyStatus(s){
   setText('info-hotpx',s.hot_pixel);
   setText('info-rtmpurl',s.rtmp_url);
 
-  // Monitor ao vivo
   if(s.monitor){
     var m=s.monitor;
     setText('mon-iso',m.iso&&m.iso>0?m.iso:null);
     setText('mon-shutter',m.shutter_ns&&m.shutter_ns>0?formatShutter(m.shutter_ns):null);
-    // AF State
     var afState=m.af_state;
     setText('mon-af',afState&&afState!=='unknown'?afState:null);
     setClass('mon-af',afState==='passive_focused'||afState==='FOCUSED'?'green':
                        afState==='passive_scan'||afState==='SEARCHING'?'yellow':null);
-    // AE State
     var aeState=m.ae_state;
     setText('mon-ae',aeState&&aeState!=='unknown'?aeState:null);
     setClass('mon-ae',aeState==='converged'||aeState==='CONVERGED'?'green':
                        aeState==='searching'||aeState==='SEARCHING'?'yellow':null);
-    // RGGB sensor
     setText('mon-rggb-r',m.rggb_r!=null?m.rggb_r.toFixed(3):null);
     setText('mon-rggb-b',m.rggb_b!=null?m.rggb_b.toFixed(3):null);
     setText('mon-rggb-gr',m.rggb_gr!=null?m.rggb_gr.toFixed(3):null);
     setText('mon-rggb-gb',m.rggb_gb!=null?m.rggb_gb.toFixed(3):null);
   }
 
-  // Manual mode
   updateManualUI(s.manual_sensor||false);
 
-  // Câmeras — monta botões na primeira carga; ignora câmeras depth
   if(s.cameras&&_caps===null){
     _caps=s.cameras;
     buildCameraButtons(s.cameras,s.camera_id);
@@ -490,9 +545,7 @@ function applyStatus(s){
     _currentCamId=String(s.camera_id);
   }
 
-  // Resolução ativa
   if(s.resolution)markActive('data-res',s.resolution);
-  // FPS ativo
   if(s.fps)markActive('data-fps',s.fps);
 }
 
