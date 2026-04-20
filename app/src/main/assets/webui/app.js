@@ -19,6 +19,8 @@ var RES_LABELS={
 };
 var RES_MIN_WIDTH=640;
 var FPS_CANDIDATES=[15,24,30,60,120,240];
+var RESOLUTION_TIER_ORDER_ASC=['720p','1080p','2K','4K','8K'];
+var WEAK_RESOLUTION_TIERS=['360p','480p','540p'];
 
 // ── Estado ──────────────────────────────────────────────────────────────────────────────
 var _caps=null;
@@ -153,7 +155,6 @@ function simplifyResolutions(cap,currentRes){
   var resolutions=filterStreamRes((cap&&cap.available_resolutions)||[]);
   var fpsMap=getFpsByResolutionMap(cap);
   var groups={};
-  var order=['8K','4K','2K','1080p','720p','540p','480p'];
 
   for(var i=0;i<resolutions.length;i++){
     var raw=resolutions[i];
@@ -166,13 +167,28 @@ function simplifyResolutions(cap,currentRes){
       w:p.w,
       h:p.h,
       pixels:p.pixels,
+      tier:tier,
       fpsList:(fpsMap[raw]||[]).slice()
     });
+  }
+
+  var hasStrongTier=false;
+  for(var s=0;s<RESOLUTION_TIER_ORDER_ASC.length;s++){
+    if(groups[RESOLUTION_TIER_ORDER_ASC[s]]&&groups[RESOLUTION_TIER_ORDER_ASC[s]].length){
+      hasStrongTier=true;
+      break;
+    }
+  }
+
+  var order=RESOLUTION_TIER_ORDER_ASC.slice();
+  if(!hasStrongTier){
+    order=WEAK_RESOLUTION_TIERS.concat(order);
   }
 
   var out=[];
   for(var j=0;j<order.length;j++){
     var tierName=order[j];
+    if(hasStrongTier&&WEAK_RESOLUTION_TIERS.indexOf(tierName)!==-1)continue;
     var items=groups[tierName];
     if(!items||!items.length)continue;
 
@@ -200,6 +216,7 @@ function simplifyResolutions(cap,currentRes){
           w:cp.w,
           h:cp.h,
           pixels:cp.pixels,
+          tier:getResolutionTierLabel(currentRes),
           fpsList:(fpsMap[currentRes]||[]).slice()
         });
       }
@@ -208,22 +225,18 @@ function simplifyResolutions(cap,currentRes){
 
   return out;
 }
-function getBestFpsForResolution(item,currentFps){
+function getBestFpsForResolution(item,currentFps,currentRes){
   if(!item||!item.fpsList||!item.fpsList.length)return null;
-  if(currentFps&&item.raw===getCurrentResolutionFromUI()&&item.fpsList.indexOf(currentFps)!==-1)return currentFps;
+  if(currentFps&&currentRes&&item.raw===currentRes&&item.fpsList.indexOf(currentFps)!==-1)return currentFps;
   return item.fpsList[item.fpsList.length-1];
-}
-function getCurrentResolutionFromUI(){
-  var active=document.querySelector('[data-res].active');
-  return active?active.getAttribute('data-res'):null;
 }
 
 // ── API ───────────────────────────────────────────────────────────────────────────────
 function sendControl(data,btn,msg){
-  fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
+  return fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
     .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
-    .then(function(){feedback(btn,true);showToast(msg||'OK',false);})
-    .catch(function(e){feedback(btn,false);showToast('ERR:'+e.message,true);});
+    .then(function(resp){feedback(btn,true);showToast(msg||'OK',false);return resp;})
+    .catch(function(e){feedback(btn,false);showToast('ERR:'+e.message,true);throw e;});
 }
 function getCap(camId){
   if(!_caps)return null;
@@ -238,7 +251,7 @@ function applyRtmpUrl(btn){
 }
 function streamAction(action,btn){
   var msgs={start:'Stream iniciado',restart:'Stream reiniciado',stop:'Stream parado'};
-  sendControl({streamAction:action},btn,msgs[action]||action);
+  return sendControl({streamAction:action},btn,msgs[action]||action);
 }
 
 // ── UI Manual ──────────────────────────────────────────────────────────────────────────
@@ -304,7 +317,7 @@ function buildResolutionButtons(cap,currentRes,currentFps){
   for(var i=0;i<simplified.length;i++){
     var item=simplified[i];
     var active=(item.raw===currentRes);
-    var fps=getBestFpsForResolution(item,currentFps);
+    var fps=getBestFpsForResolution(item,currentFps,currentRes);
     var text=resLabel(item.raw)+(fps?' · '+fps+'fps':'');
     html+='<button data-res="'+item.raw+'" title="'+item.raw+(fps?' @ '+fps+'fps':'')+'"'+(active?' class="active"':'')+
           ' onclick="setResolutionProfile(\''+item.raw+'\','+(fps||'null')+',this)">'+text+'</button>';
@@ -318,8 +331,21 @@ function setResolutionProfile(res,fps,btn){
     payload.fps=fps;
     msg+=' · '+fps+'fps';
   }
-  sendControl(payload,btn,msg);
-  markActive('data-res',res);
+
+  var wasStreaming=false;
+  var streamLabel=document.getElementById('lbl-stream');
+  if(streamLabel&&streamLabel.textContent==='AO VIVO')wasStreaming=true;
+
+  return sendControl(payload,btn,msg)
+    .then(function(){
+      markActive('data-res',res);
+      if(wasStreaming){
+        return streamAction('restart',btn);
+      }
+    })
+    .then(function(){
+      if(wasStreaming)showToast(msg+' · stream reiniciada',false);
+    });
 }
 function setFps(fps,btn){
   sendControl({fps:fps},btn,fps+'fps');
