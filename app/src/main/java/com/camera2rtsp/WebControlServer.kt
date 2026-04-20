@@ -3,29 +3,6 @@ package com.camera2rtsp
 import android.content.Context
 import com.camera2rtsp.auth.SessionManager
 import fi.iki.elonen.NanoHTTPD
-
-/**
- * WebControlServer (NanoHTTPD)
- *
- * Inicia ANTES do login Supabase - rotas publicas sao servidas sem cookie.
- * Apenas as rotas protegidas exigem sessao CAMSESSION valida.
- *
- * Rotas publicas (sem autenticacao):
- *   GET  /auth/login   -> serve login.html direto (NUNCA redirect para evitar loop)
- *   POST /auth/login   -> processa credenciais web
- *   GET  /auth/logout  -> limpa cookie, redireciona para /auth/login
- *   GET  /style.css    -> CSS publico
- *   GET  /app.js       -> JS publico
- *
- * Rotas protegidas (exigem cookie CAMSESSION):
- *   GET  /             -> index.html
- *   GET  /status       -> status JSON
- *   GET  /api/*        -> APIs JSON
- *   POST /api/control  -> controle camera
- *
- * Fix issue #5: / sem auth serve login.html DIRETO (sem redirect)
- * eliminando o loop ERR_TOO_MANY_REDIRECTS.
- */
 class WebControlServer(
     port: Int,
     private val cameraController: Camera2Controller,
