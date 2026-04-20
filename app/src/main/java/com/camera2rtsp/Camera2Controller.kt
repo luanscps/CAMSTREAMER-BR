@@ -71,7 +71,7 @@ class Camera2Controller {
         runCatching {
             Camera2Base::class.java.getDeclaredField("cameraManager")
                 .also { it.isAccessible = true }
-        }.onFailure { Log.w(tag, "[reflection] campo 'cameraManager' não encontrado: ${it.message}") }
+        }.onFailure { Log.w(tag, "[reflection] campo 'cameraManager' nao encontrado: ${it.message}") }
             .getOrNull()
     }
 
@@ -94,7 +94,7 @@ class Camera2Controller {
 
     fun initLiveMonitor() {
         val cam2mgr = getCam2Manager() ?: run {
-            Log.w(tag, "[liveMonitor] getCam2Manager nulo — abortando")
+            Log.w(tag, "[liveMonitor] getCam2Manager nulo - abortando")
             return
         }
         runCatching {
@@ -305,7 +305,7 @@ class Camera2Controller {
                         b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON)
                         b.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_SINGLE)
                     }
-                    if (!ok) Log.w(tag, "flash single não suportado via custom request")
+                    if (!ok) Log.w(tag, "flash single nao suportado via custom request")
                     lanternEnabled = false
                 }
                 else -> runCatching { cam.disableLantern(); lanternEnabled = false }
@@ -487,7 +487,7 @@ class Camera2Controller {
                 post { runCatching { cam.setZoom(cam.zoomRange.lower) } }
                 Log.d(tag, "opticalZoom idx=$idx focalLength=${opticalZoomLevels[idx]}mm")
             } else {
-                Log.w(tag, "opticalZoom idx=$idx inválido")
+                Log.w(tag, "opticalZoom idx=$idx invalido")
             }
         }
 
@@ -732,7 +732,7 @@ class Camera2Controller {
                 }
             } ?: emptyList()
 
-            // ── Scene Modes (17 = HIGH_SPEED_VIDEO, deprecated como constante no Android 12+)
+            // Scene Modes (17 = HIGH_SPEED_VIDEO, deprecated como constante no Android 12+)
             val sceneModes = ch.get(CameraCharacteristics.CONTROL_AVAILABLE_SCENE_MODES)?.map {
                 when (it) {
                     CameraMetadata.CONTROL_SCENE_MODE_DISABLED       -> "disabled"
@@ -757,27 +757,27 @@ class Camera2Controller {
                 }
             }?.filter { it != "disabled" } ?: emptyList()
 
-            // ── Effect Modes
+            // Effect Modes
             val effectModes = ch.get(CameraCharacteristics.CONTROL_AVAILABLE_EFFECTS)?.map {
                 when (it) {
-                    CameraMetadata.CONTROL_EFFECT_MODE_OFF       -> "off"
-                    CameraMetadata.CONTROL_EFFECT_MODE_MONO      -> "mono"
-                    CameraMetadata.CONTROL_EFFECT_MODE_NEGATIVE  -> "negative"
-                    CameraMetadata.CONTROL_EFFECT_MODE_SOLARIZE  -> "solarize"
-                    CameraMetadata.CONTROL_EFFECT_MODE_SEPIA     -> "sepia"
-                    CameraMetadata.CONTROL_EFFECT_MODE_POSTERIZE -> "posterize"
+                    CameraMetadata.CONTROL_EFFECT_MODE_OFF        -> "off"
+                    CameraMetadata.CONTROL_EFFECT_MODE_MONO       -> "mono"
+                    CameraMetadata.CONTROL_EFFECT_MODE_NEGATIVE   -> "negative"
+                    CameraMetadata.CONTROL_EFFECT_MODE_SOLARIZE   -> "solarize"
+                    CameraMetadata.CONTROL_EFFECT_MODE_SEPIA      -> "sepia"
+                    CameraMetadata.CONTROL_EFFECT_MODE_POSTERIZE  -> "posterize"
                     CameraMetadata.CONTROL_EFFECT_MODE_WHITEBOARD -> "whiteboard"
                     CameraMetadata.CONTROL_EFFECT_MODE_BLACKBOARD -> "blackboard"
-                    CameraMetadata.CONTROL_EFFECT_MODE_AQUA      -> "aqua"
+                    CameraMetadata.CONTROL_EFFECT_MODE_AQUA       -> "aqua"
                     else -> "unknown_$it"
                 }
             }?.filter { it != "off" } ?: emptyList()
 
-            // ── Focus Distance Calibration
+            // Focus Distance Calibration
             val focusCalibration = when (ch.get(CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION)) {
-                CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION_CALIBRATED   -> "CALIBRATED"
-                CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION_APPROXIMATE  -> "APPROXIMATE"
-                else                                                                     -> "UNCALIBRATED"
+                CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION_CALIBRATED  -> "CALIBRATED"
+                CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION_APPROXIMATE -> "APPROXIMATE"
+                else                                                                   -> "UNCALIBRATED"
             }
 
             val hasFlash = ch.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
@@ -793,16 +793,16 @@ class Camera2Controller {
             }
             val isDepth = supDepth && resolutions.isEmpty()
             val name = when {
-                isDepth                        -> "Depth/ToF"
+                isDepth                         -> "Depth/ToF"
                 id == "0" && facing == "BACK"  -> "Wide"
                 id == "1" && facing == "FRONT" -> "Frontal"
                 id == "2" && facing == "BACK"  -> "Ultra Wide"
                 id == "3" && facing == "BACK"  -> "Telephoto"
-                facing == "FRONT"              -> "Frontal $id"
-                else                           -> "Cam $id"
+                facing == "FRONT"               -> "Frontal $id"
+                else                            -> "Cam $id"
             }
 
-            // ── Campos novos de CameraCapabilities ──────────────────────────────
+            // Campos novos de CameraCapabilities
             val pixelArraySize   = ch.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)
             val sensorPixelArr   = pixelArraySize?.let { listOf(it.width, it.height) }
             val physicalSize     = ch.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
