@@ -11,15 +11,14 @@ var ISO_LIST=[50,81,112,143,174,205,236,267,298,329,360,391,422,453,484,
 var SHUTTER_STOPS=['1/24','1/30','1/50','1/60','1/100','1/250','1/500','1/1000','1/2000','1/4000','1/10000'];
 var FRAME_STOPS=['1/15','1/24','1/30','1/60'];
 
-// Label bonito para resoluções comuns de vídeo
 var RES_LABELS={
   '7680x4320':'8K','3840x2160':'4K','4032x2268':'4K','4608x2592':'4K',
   '2560x1440':'2K','1920x1080':'1080p','1920x1440':'1080p',
   '1280x720':'720p','960x540':'540p','854x480':'480p',
   '640x360':'360p'
 };
-// Resoluções válidas para streaming (descarta miniaturas <540p por padrão)
 var RES_MIN_WIDTH=640;
+var FPS_CANDIDATES=[15,24,30,60,120,240];
 
 // ── Estado ──────────────────────────────────────────────────────────────────────────────
 var _caps=null;
@@ -30,7 +29,6 @@ var _toastTimer;
 var _pollFail=0;
 var _pollCtrl=null;
 
-// debounce timers
 var _brT,_zT,_fT,_iT,_eT,_shT,_frT;
 var _rgT_R,_rgT_Gr,_rgT_Gb,_rgT_B;
 
@@ -57,12 +55,6 @@ function showCard(id,show){
   var el=document.getElementById(id);if(!el)return;
   show?el.classList.remove('hidden'):el.classList.add('hidden');
 }
-function debounce(fn,delay,timerRef){
-  return function(){
-    clearTimeout(timerRef);
-    timerRef=setTimeout(fn,delay);
-  };
-}
 
 function parseResolution(res){
   var parts=String(res||'').split('x');
@@ -72,7 +64,6 @@ function parseResolution(res){
   if(!w||!h)return null;
   return { raw:res, w:w, h:h, pixels:w*h };
 }
-
 function getResolutionTierLabel(res){
   var p=parseResolution(res);
   if(!p)return res;
@@ -87,18 +78,96 @@ function getResolutionTierLabel(res){
   if(h>=480)return '480p';
   return res;
 }
+function resLabel(res){
+  var tier=getResolutionTierLabel(res);
+  if(tier!==res)return tier;
+  if(RES_LABELS[res])return RES_LABELS[res];
+  return res;
+}
+function filterStreamRes(resolutions){
+  return (resolutions||[]).filter(function(r){
+    var parts=String(r).split('x');
+    return parts.length===2&&parseInt(parts[0],10)>=RES_MIN_WIDTH;
+  });
+}
+function normalizeRange(range){
+  if(!range)return null;
+  if(Array.isArray(range)&&range.length>=2)return { min:parseInt(range[0],10), max:parseInt(range[1],10) };
+  if(typeof range==='object'){
+    if(range.min!==undefined&&range.max!==undefined)return { min:parseInt(range.min,10), max:parseInt(range.max,10) };
+    if(range.lower!==undefined&&range.upper!==undefined)return { min:parseInt(range.lower,10), max:parseInt(range.upper,10) };
+  }
+  return null;
+}
+function getSupportedFpsList(fpsRanges){
+  var out=[];
+  for(var i=0;i<FPS_CANDIDATES.length;i++){
+    var fps=FPS_CANDIDATES[i];
+    var supported=false;
+    if(fpsRanges){
+      for(var j=0;j<fpsRanges.length;j++){
+        var r=normalizeRange(fpsRanges[j]);
+        if(r&&fps>=r.min&&fps<=r.max){supported=true;break;}
+      }
+    }
+    if(supported)out.push(fps);
+  }
+  return out;
+}
+function getFpsByResolutionMap(cap){
+  var map={};
+  if(!cap)return map;
 
-function simplifyResolutions(resolutions,currentRes){
-  var filtered=filterStreamRes(resolutions);
+  var source=cap.resolution_fps_map||cap.resolution_fps_ranges||cap.fps_by_resolution||null;
+  if(source){
+    for(var key in source){
+      if(!Object.prototype.hasOwnProperty.call(source,key))continue;
+      var fpsList=[];
+      var entry=source[key];
+      if(Array.isArray(entry)){
+        for(var i=0;i<entry.length;i++){
+          var normalized=normalizeRange(entry[i]);
+          if(normalized){
+            for(var c=0;c<FPS_CANDIDATES.length;c++){
+              var fps=FPS_CANDIDATES[c];
+              if(fps>=normalized.min&&fps<=normalized.max&&fpsList.indexOf(fps)===-1)fpsList.push(fps);
+            }
+          } else {
+            var direct=parseInt(entry[i],10);
+            if(direct&&fpsList.indexOf(direct)===-1)fpsList.push(direct);
+          }
+        }
+      }
+      fpsList.sort(function(a,b){return a-b;});
+      map[key]=fpsList;
+    }
+    return map;
+  }
+
+  var fallback=getSupportedFpsList(cap.fps_ranges||null);
+  var resolutions=cap.available_resolutions||[];
+  for(var r=0;r<resolutions.length;r++)map[resolutions[r]]=fallback.slice();
+  return map;
+}
+function simplifyResolutions(cap,currentRes){
+  var resolutions=filterStreamRes((cap&&cap.available_resolutions)||[]);
+  var fpsMap=getFpsByResolutionMap(cap);
   var groups={};
   var order=['8K','4K','2K','1080p','720p','540p','480p'];
-  for(var i=0;i<filtered.length;i++){
-    var r=filtered[i];
-    var p=parseResolution(r);
+
+  for(var i=0;i<resolutions.length;i++){
+    var raw=resolutions[i];
+    var p=parseResolution(raw);
     if(!p)continue;
-    var tier=getResolutionTierLabel(r);
+    var tier=getResolutionTierLabel(raw);
     if(!groups[tier])groups[tier]=[];
-    groups[tier].push(p);
+    groups[tier].push({
+      raw:raw,
+      w:p.w,
+      h:p.h,
+      pixels:p.pixels,
+      fpsList:(fpsMap[raw]||[]).slice()
+    });
   }
 
   var out=[];
@@ -108,41 +177,30 @@ function simplifyResolutions(resolutions,currentRes){
     if(!items||!items.length)continue;
 
     var chosen=items[0];
-    var hasCurrent=false;
     for(var k=0;k<items.length;k++){
-      if(items[k].raw===currentRes){
-        chosen=items[k];
-        hasCurrent=true;
-        break;
-      }
-      if(items[k].pixels>chosen.pixels){
-        chosen=items[k];
-      }
+      var item=items[k];
+      if(item.raw===currentRes){ chosen=item; break; }
+      var chosenMax=chosen.fpsList.length?chosen.fpsList[chosen.fpsList.length-1]:0;
+      var itemMax=item.fpsList.length?item.fpsList[item.fpsList.length-1]:0;
+      if(itemMax>chosenMax||(itemMax===chosenMax&&item.pixels>chosen.pixels))chosen=item;
     }
-
-    out.push({
-      tier:tierName,
-      raw:chosen.raw,
-      w:chosen.w,
-      h:chosen.h,
-      isCurrent:hasCurrent
-    });
+    out.push(chosen);
   }
 
   if(currentRes){
-    var alreadyIncluded=false;
+    var exists=false;
     for(var x=0;x<out.length;x++){
-      if(out[x].raw===currentRes){alreadyIncluded=true;break;}
+      if(out[x].raw===currentRes){exists=true;break;}
     }
-    if(!alreadyIncluded){
+    if(!exists){
       var cp=parseResolution(currentRes);
       if(cp){
         out.push({
-          tier:getResolutionTierLabel(currentRes),
           raw:currentRes,
           w:cp.w,
           h:cp.h,
-          isCurrent:true
+          pixels:cp.pixels,
+          fpsList:(fpsMap[currentRes]||[]).slice()
         });
       }
     }
@@ -150,21 +208,14 @@ function simplifyResolutions(resolutions,currentRes){
 
   return out;
 }
-
-// Label legível para resolução resumida
-function resLabel(res){
-  var tier=getResolutionTierLabel(res);
-  if(tier!==res)return tier;
-  if(RES_LABELS[res])return RES_LABELS[res];
-  return res;
+function getBestFpsForResolution(item,currentFps){
+  if(!item||!item.fpsList||!item.fpsList.length)return null;
+  if(currentFps&&item.raw===getCurrentResolutionFromUI()&&item.fpsList.indexOf(currentFps)!==-1)return currentFps;
+  return item.fpsList[item.fpsList.length-1];
 }
-
-// Filtra resoluções úteis para streaming (descarta miniaturas)
-function filterStreamRes(resolutions){
-  return (resolutions||[]).filter(function(r){
-    var parts=String(r).split('x');
-    return parts.length===2&&parseInt(parts[0],10)>=RES_MIN_WIDTH;
-  });
+function getCurrentResolutionFromUI(){
+  var active=document.querySelector('[data-res].active');
+  return active?active.getAttribute('data-res'):null;
 }
 
 // ── API ───────────────────────────────────────────────────────────────────────────────
@@ -239,11 +290,11 @@ function switchCamera(camId,btn){
 }
 
 // ── Resoluções + FPS ──────────────────────────────────────────────────────────────────────
-function buildResolutionButtons(resolutions,currentRes){
+function buildResolutionButtons(cap,currentRes,currentFps){
   var container=document.getElementById('btngroup-resolution');
   if(!container)return;
 
-  var simplified=simplifyResolutions(resolutions,currentRes);
+  var simplified=simplifyResolutions(cap,currentRes);
   if(!simplified.length){
     container.innerHTML='<span style="color:var(--muted)">Nenhuma resolução disponível</span>';
     return;
@@ -253,34 +304,21 @@ function buildResolutionButtons(resolutions,currentRes){
   for(var i=0;i<simplified.length;i++){
     var item=simplified[i];
     var active=(item.raw===currentRes);
-    var lbl=resLabel(item.raw);
-    html+='<button data-res="'+item.raw+'" title="'+item.raw+'"'+(active?' class="active"':'')+
-          ' onclick="setResolution(\''+item.raw+'\',this)">'+lbl+'</button>';
+    var fps=getBestFpsForResolution(item,currentFps);
+    var text=resLabel(item.raw)+(fps?' · '+fps+'fps':'');
+    html+='<button data-res="'+item.raw+'" title="'+item.raw+(fps?' @ '+fps+'fps':'')+'"'+(active?' class="active"':'')+
+          ' onclick="setResolutionProfile(\''+item.raw+'\','+(fps||'null')+',this)">'+text+'</button>';
   }
   container.innerHTML=html;
 }
-function buildFpsButtons(fpsRanges,currentFps){
-  var container=document.getElementById('btngroup-fps');
-  if(!container)return;
-  var candidates=[15,24,30,60,120,240];
-  var html='';
-  for(var i=0;i<candidates.length;i++){
-    var fps=candidates[i];
-    var supported=false;
-    if(fpsRanges){
-      for(var j=0;j<fpsRanges.length;j++){
-        if(fps>=fpsRanges[j][0]&&fps<=fpsRanges[j][1]){supported=true;break;}
-      }
-    }
-    if(!supported)continue;
-    var active=(fps===currentFps);
-    html+='<button data-fps="'+fps+'"'+(active?' class="active"':'')+
-          ' onclick="setFps('+fps+',this)">'+fps+'fps</button>';
+function setResolutionProfile(res,fps,btn){
+  var payload={resolution:res};
+  var msg=resLabel(res);
+  if(fps){
+    payload.fps=fps;
+    msg+=' · '+fps+'fps';
   }
-  container.innerHTML=html||'<span style="color:var(--muted)">-</span>';
-}
-function setResolution(res,btn){
-  sendControl({resolution:res},btn,resLabel(res));
+  sendControl(payload,btn,msg);
   markActive('data-res',res);
 }
 function setFps(fps,btn){
@@ -464,8 +502,7 @@ function applyLatencyMin(btn){
 function applyCameraCapabilities(camId){
   var cap=getCap(camId);
   if(!cap)return;
-  buildResolutionButtons(cap.available_resolutions||[],cap.current_resolution);
-  buildFpsButtons(cap.fps_ranges||null,cap.current_fps);
+  buildResolutionButtons(cap,cap.current_resolution,cap.current_fps);
   buildFocusModeButtons(cap.supported_af_modes||cap.af_modes||[],cap.current_af_mode);
   buildWBButtons(cap.supported_awb_modes||cap.awb_modes||[],cap.current_wb);
   updateOISCapability(cap.has_ois||false);
@@ -546,7 +583,6 @@ function applyStatus(s){
   }
 
   if(s.resolution)markActive('data-res',s.resolution);
-  if(s.fps)markActive('data-fps',s.fps);
 }
 
 function formatShutter(ns){
