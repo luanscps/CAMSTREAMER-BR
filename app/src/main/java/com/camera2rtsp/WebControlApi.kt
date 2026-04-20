@@ -8,8 +8,8 @@ import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoHTTPD.Response
 import fi.iki.elonen.NanoHTTPD.IHTTPSession
 
-/**
- * WebControlApi — v5-CAMUI
+/*
+ * WebControlApi - v5-CAMUI
  *
  * /api/status agora emite JSON no formato exato que o app.js consome:
  *
@@ -28,9 +28,9 @@ import fi.iki.elonen.NanoHTTPD.IHTTPSession
  *    focal_length: Float,
  *    aperture: Float,
  *    wb: String,
- *    ois: Bool,
- *    eis: Bool,
- *    manual_sensor: Bool,
+ *    ois: Boolean,
+ *    eis: Boolean,
+ *    manual_sensor: Boolean,
  *    edge: String,
  *    nr: String,
  *    hot_pixel: String,
@@ -49,7 +49,7 @@ object WebControlApi {
         .setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
         .create()
 
-    // ── Cache de capabilities ──────────────────────────────────────────────────
+    // Cache de capabilities
     @Volatile private var capsCache: List<CameraCapabilities>? = null
     @Volatile private var capsCacheForCamId: String? = null
 
@@ -66,26 +66,26 @@ object WebControlApi {
         return fresh
     }
 
-    // ── GET /api/capabilities ──────────────────────────────────────────────────
+    // GET /api/capabilities
     fun serveCapabilities(cameraController: Camera2Controller, context: Context): Response {
         return okJson(gson.toJson(getCapsCache(cameraController, context)))
     }
 
-    // ── GET /api/status ────────────────────────────────────────────────────────
+    // GET /api/status
     fun serveStatus(cameraController: Camera2Controller, context: Context): Response {
         val c = cameraController
         val streaming = c.rtmpCamera?.isStreaming == true
 
-        // Câmeras — usa cache, app.js usa na primeira carga para montar botões
+        // Cameras - usa cache, app.js usa na primeira carga para montar botoes
         val cameras = getCapsCache(c, context)
 
-        // Calibração de foco da câmera ativa (via cache)
+        // Calibracao de foco da camera ativa (via cache)
         val focusCalibration = try {
             cameras.firstOrNull { it.cameraId == c.currentCameraId }
                 ?.focusDistanceCalibration ?: "UNCALIBRATED"
         } catch (e: Exception) { "UNCALIBRATED" }
 
-        // Monitor ao vivo — objeto separado como app.js espera em s.monitor
+        // Monitor ao vivo - objeto separado como app.js espera em s.monitor
         val monitor = mapOf(
             "iso"        to c.liveIso,
             "shutter_ns" to c.liveExposureNs,
@@ -97,12 +97,12 @@ object WebControlApi {
             "rggb_b"     to c.liveRggbB
         )
 
-        // Raiz do JSON — nomes exatos que o app.js lê
+        // Raiz do JSON - nomes exatos que o app.js le
         val status = mapOf(
             // Stream
             "streaming"       to streaming,
             "rtmp_url"        to (StreamingService.instance?.rtmpUrl ?: ""),
-            // Câmera
+            // Camera
             "camera_id"       to c.currentCameraId,
             "resolution"      to "${c.currentWidth}x${c.currentHeight}",
             "bitrate_kbps"    to c.currentBitrate,
@@ -116,7 +116,7 @@ object WebControlApi {
             "exposure_ns"     to c.exposureNs,
             "frame_duration_ns" to c.frameDurationNs,
             "manual_sensor"   to c.manualSensor,
-            // Óptica
+            // Optica
             "focal_length"    to 4.30f,
             "aperture"        to 1.5f,
             "zoom"            to c.zoomLevel,
@@ -136,19 +136,19 @@ object WebControlApi {
             "rggb_gr"         to c.rggbGains[1],
             "rggb_gb"         to c.rggbGains[2],
             "rggb_b"          to c.rggbGains[3],
-            // Zoom óptico
+            // Zoom optico
             "optical_zoom_index"  to c.opticalZoomIndex,
             "optical_zoom_levels" to c.opticalZoomLevels,
             // Monitor ao vivo (TotalCaptureResult)
             "monitor"         to monitor,
-            // Câmeras disponíveis — app.js usa para construir botões na 1ª carga
+            // Cameras disponiveis - app.js usa para construir botoes na 1a carga
             "cameras"         to cameras
         )
 
         return okJson(gson.toJson(status))
     }
 
-    // ── POST /api/control ──────────────────────────────────────────────────────
+    // POST /api/control
     fun handleControl(session: IHTTPSession, cameraController: Camera2Controller): Response {
         val map = mutableMapOf<String, String>()
         return try {
@@ -160,7 +160,7 @@ object WebControlApi {
                 json, object : TypeToken<Map<String, Any>>() {}.type
             )
 
-            // Ações de stream
+            // Acoes de stream
             (params["streamAction"] as? String)?.let { action ->
                 val svc = StreamingService.instance
                 when (action) {
@@ -180,7 +180,7 @@ object WebControlApi {
                 }
             }
 
-            // Troca de câmera — invalida cache de capabilities
+            // Troca de camera - invalida cache de capabilities
             if (params.containsKey("camera") || params.containsKey("camera_id")) {
                 capsCache = null
                 capsCacheForCamId = null
@@ -196,7 +196,7 @@ object WebControlApi {
         }
     }
 
-    // ── Helpers de conversão de modo ───────────────────────────────────────────
+    // Helpers de conversao de modo
     private fun edgeModeStr(v: Int) = when (v) {
         android.hardware.camera2.CameraMetadata.EDGE_MODE_OFF          -> "off"
         android.hardware.camera2.CameraMetadata.EDGE_MODE_FAST         -> "fast"
@@ -219,7 +219,7 @@ object WebControlApi {
         else -> "high_quality"
     }
 
-    // ── Resposta JSON com CORS ─────────────────────────────────────────────────
+    // Resposta JSON com CORS
     private fun okJson(body: String): Response {
         val resp = NanoHTTPD.newFixedLengthResponse(Response.Status.OK, "application/json", body)
         resp.addHeader("Access-Control-Allow-Origin", "*")

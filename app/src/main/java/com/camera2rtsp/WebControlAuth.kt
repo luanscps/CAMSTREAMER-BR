@@ -9,18 +9,18 @@ import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoHTTPD.Response
 import kotlinx.coroutines.runBlocking
 
-/**
- * WebControlAuth — Login/Logout da WebGUI usando Supabase (mesmas credenciais do app).
+/*
+ * WebControlAuth - Login/Logout da WebGUI usando Supabase (mesmas credenciais do app).
  *
- * POST /auth/login  → email + password → valida no Supabase → seta cookie CAMSESSION
- * GET  /auth/logout → invalida token   → expira cookie
- * GET  /api/plan    → retorna plano atual
+ * POST /auth/login  -> email + password -> valida no Supabase -> seta cookie CAMSESSION
+ * GET  /auth/logout -> invalida token   -> expira cookie
+ * GET  /api/plan    -> retorna plano atual
  */
 object WebControlAuth {
 
     private val gson = Gson()
 
-    // ── POST /auth/login ───────────────────────────────────────────────────
+    // POST /auth/login
 
     fun handleLogin(session: NanoHTTPD.IHTTPSession): Response {
         return try {
@@ -32,10 +32,10 @@ object WebControlAuth {
                 json, object : TypeToken<Map<String, Any>>() {}.type
             )
 
-            val email    = (params["email"]    as? String) ?: return badRequest("Campo 'email' obrigatório")
-            val password = (params["password"] as? String) ?: return badRequest("Campo 'password' obrigatório")
+            val email    = (params["email"]    as? String) ?: return badRequest("Campo 'email' obrigatorio")
+            val password = (params["password"] as? String) ?: return badRequest("Campo 'password' obrigatorio")
 
-            // Valida no Supabase — mesmas credenciais do app
+            // Valida no Supabase - mesmas credenciais do app
             val authResp = runBlocking {
                 ApiClient.supabaseAuth.login(
                     apiKey = ApiClient.SUPABASE_ANON_KEY,
@@ -50,8 +50,8 @@ object WebControlAuth {
                     j.get("error_description")?.asString
                         ?: j.get("msg")?.asString
                         ?: j.get("error")?.asString
-                        ?: "Credenciais inválidas"
-                } catch (_: Exception) { "Credenciais inválidas" }
+                        ?: "Credenciais invalidas"
+                } catch (_: Exception) { "Credenciais invalidas" }
 
                 val resp = NanoHTTPD.newFixedLengthResponse(
                     Response.Status.UNAUTHORIZED, "application/json",
@@ -61,7 +61,7 @@ object WebControlAuth {
                 return resp
             }
 
-            // Login OK → cria sessão WebGUI (cookie 8h)
+            // Login OK -> cria sessao WebGUI (cookie 8h)
             val token = SessionManager.createWebSession()
             val resp = NanoHTTPD.newFixedLengthResponse(
                 Response.Status.OK, "application/json",
@@ -76,7 +76,7 @@ object WebControlAuth {
         }
     }
 
-    // ── GET /auth/logout ───────────────────────────────────────────────────
+    // GET /auth/logout
 
     fun handleLogout(): Response {
         SessionManager.invalidateWebSession()
@@ -88,7 +88,7 @@ object WebControlAuth {
         return resp
     }
 
-    // ── GET /api/plan ──────────────────────────────────────────────────────
+    // GET /api/plan
 
     fun servePlan(): Response {
         val f = SessionManager.features
@@ -98,7 +98,7 @@ object WebControlAuth {
         return resp
     }
 
-    // ── Helpers ────────────────────────────────────────────────────────────
+    // Helpers
 
     private fun badRequest(msg: String): Response {
         val resp = NanoHTTPD.newFixedLengthResponse(
