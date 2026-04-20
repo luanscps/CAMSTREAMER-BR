@@ -20,6 +20,7 @@ import android.view.View
 import android.view.animation.DecelerateInterpolator
 import android.view.inputmethod.InputMethodManager
 import android.widget.*
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -27,7 +28,7 @@ import com.pedro.library.view.OpenGlView
 
 class MainActivity : AppCompatActivity() {
 
-    // -- Views ---------------------------------------------------------------
+    // Views (lateinit - so inicializados apos permissoes)
     private lateinit var cameraPreview: OpenGlView
     private lateinit var topBar: View
     private lateinit var statusText: TextView
@@ -42,27 +43,27 @@ class MainActivity : AppCompatActivity() {
     private lateinit var editRtmpUrl: EditText
     private lateinit var btnApplyRtmpUrl: Button
 
-    // -- SharedPreferences ---------------------------------------------------
+    // SharedPreferences
     private lateinit var prefs: SharedPreferences
     private val prefFile   = "camera2rtmp_prefs"
     private val keyRtmpUrl = "rtmp_url"
-    // Fix 5: usa a constante centralizada no StreamingService
     private val defaultUrl get() = StreamingService.DEFAULT_RTMP_URL
 
-    // -- Estado --------------------------------------------------------------
-    private var isPanelOpen = false
-    // Fix 1: isStreaming lê diretamente do service
+    // Estado
+    private var isPanelOpen    = false
+    private var uiInitialized  = false
     private val isStreaming: Boolean
         get() = service?.rtmpStreamer?.isStreaming ?: false
 
-    // -- HUD ticker ----------------------------------------------------------
+    // HUD ticker
     private val hudHandler  = Handler(Looper.getMainLooper())
     private val hudRunnable = object : Runnable {
         override fun run() { tickHud(); hudHandler.postDelayed(this, 1000) }
     }
+
     private val permissionCode = 100
 
-    // -- Service binding -----------------------------------------------------
+    // Service binding
     private var service: StreamingService? = null
     private var viewAttached = false
 
@@ -78,27 +79,32 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // -- Lifecycle -----------------------------------------------------------
+    // Lifecycle
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
         prefs = getSharedPreferences(prefFile, Context.MODE_PRIVATE)
-        bindViews()
-        setupBottomActions()
-        setupSettingsPanel()
-        if (checkPermissions()) startAndBindService() else requestPermissions()
-        hudHandler.post(hudRunnable)
+
+        // Fix #7: verifica permissoes ANTES de qualquer init de UI
+        if (checkPermissions()) {
+            initializeUI()
+        } else {
+            // Exibe tela minima enquanto solicita permissoes
+            setContentView(R.layout.activity_permission_request)
+            requestPermissions()
+        }
     }
 
     override fun onResume() {
         super.onResume()
+        if (!uiInitialized) return
         refreshStatusBar()
         if (service == null) bindToService()
     }
 
     override fun onStop() {
         super.onStop()
+        if (!uiInitialized) return
         service?.detachView()
         viewAttached = false
         try { unbindService(serviceConnection) } catch (_: Exception) {}
@@ -112,7 +118,20 @@ class MainActivity : AppCompatActivity() {
 
     override fun onConfigurationChanged(newConfig: Configuration) { super.onConfigurationChanged(newConfig) }
 
-    // -- Service binding helpers ---------------------------------------------
+    // Inicializacao de UI (so chamada apos permissoes concedidas)
+
+    private fun initializeUI() {
+        if (uiInitialized) return
+        uiInitialized = true
+        setContentView(R.layout.activity_main)
+        bindViews()
+        setupBottomActions()
+        setupSettingsPanel()
+        startAndBindService()
+        hudHandler.post(hudRunnable)
+    }
+
+    // Service binding helpers
 
     private fun startAndBindService() {
         val url = prefs.getString(keyRtmpUrl, defaultUrl) ?: defaultUrl
@@ -145,38 +164,36 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // -- Bind views ----------------------------------------------------------
+    // Bind views
 
     private fun bindViews() {
-        cameraPreview  = findViewById(R.id.cameraPreview)
-        topBar         = findViewById(R.id.topBar)
-        statusText     = findViewById(R.id.statusText)
-        rtspBadge      = findViewById(R.id.rtspBadge)
-        clientsBadge   = findViewById(R.id.clientsBadge)
-        batteryText    = findViewById(R.id.batteryText)
-        bottomActions  = findViewById(R.id.bottomActions)
-        settingsPanel  = findViewById(R.id.settingsPanel)
-        btnShutter     = findViewById(R.id.btnShutter)
-        btnSettings    = findViewById(R.id.btnSettings)
-        btnClosePanel  = settingsPanel.findViewById(R.id.btnClosePanel)
-        editRtmpUrl    = settingsPanel.findViewById(R.id.editRtmpUrl)
+        cameraPreview   = findViewById(R.id.cameraPreview)
+        topBar          = findViewById(R.id.topBar)
+        statusText      = findViewById(R.id.statusText)
+        rtspBadge       = findViewById(R.id.rtspBadge)
+        clientsBadge    = findViewById(R.id.clientsBadge)
+        batteryText     = findViewById(R.id.batteryText)
+        bottomActions   = findViewById(R.id.bottomActions)
+        settingsPanel   = findViewById(R.id.settingsPanel)
+        btnShutter      = findViewById(R.id.btnShutter)
+        btnSettings     = findViewById(R.id.btnSettings)
+        btnClosePanel   = settingsPanel.findViewById(R.id.btnClosePanel)
+        editRtmpUrl     = settingsPanel.findViewById(R.id.editRtmpUrl)
         btnApplyRtmpUrl = settingsPanel.findViewById(R.id.btnApplyRtmpUrl)
 
         val savedUrl = prefs.getString(keyRtmpUrl, defaultUrl) ?: defaultUrl
         editRtmpUrl.setText(savedUrl)
     }
 
-    // -- Bottom actions ------------------------------------------------------
+    // Bottom actions
 
     private fun setupBottomActions() {
         btnShutter.setOnClickListener {
-            // Fix 1: lê estado real do service antes de agir
             if (isStreaming) {
                 service?.stopStream()
             } else {
                 service?.startStream()
             }
-            // Visual atualizado imediatamente; tickHud sincroniza em até 1s
             btnShutter.setBackgroundResource(
                 if (!isStreaming) R.drawable.bg_shutter_active else R.drawable.bg_shutter_inner
             )
@@ -186,7 +203,7 @@ class MainActivity : AppCompatActivity() {
         btnClosePanel.setOnClickListener { closePanel() }
     }
 
-    // -- Settings panel ------------------------------------------------------
+    // Settings panel
 
     private fun setupSettingsPanel() {
         btnApplyRtmpUrl.setOnClickListener {
@@ -228,28 +245,24 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // -- HUD ticker ----------------------------------------------------------
+    // HUD ticker
 
     private fun tickHud() {
         val streaming = isStreaming
 
-        // Fix badge: LIVE = verde, OFF = vermelho
         rtspBadge.text = if (streaming) "LIVE" else "OFF"
         rtspBadge.setBackgroundResource(
             if (streaming) R.drawable.bg_badge_green else R.drawable.bg_badge_red
         )
-        // Sincroniza botão shutter com estado real
         btnShutter.setBackgroundResource(
             if (streaming) R.drawable.bg_shutter_active else R.drawable.bg_shutter_inner
         )
 
-        // Fix 2: clientsBadge — tipo explícito evita ambiguidade de inferência no Kotlin
         val httpServer: WebControlServer? = service?.httpServer
         val clients = if (httpServer != null && httpServer.isAlive) httpServer.connectedClients else 0
         clientsBadge.text = if (clients > 0) "\uD83D\uDDA5 $clients" else "\uD83D\uDDA5 0"
         clientsBadge.alpha = if (clients > 0) 1f else 0.4f
 
-        // Bateria
         val bat = getBattery()
         batteryText.text = "$bat%"
         batteryText.setTextColor(when {
@@ -259,7 +272,7 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    // -- Helpers -------------------------------------------------------------
+    // Helpers
 
     private fun refreshStatusBar() {
         val url = prefs.getString(keyRtmpUrl, defaultUrl) ?: defaultUrl
@@ -273,7 +286,7 @@ class MainActivity : AppCompatActivity() {
     private fun showToast(msg: String) =
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
 
-    // -- Permissões ----------------------------------------------------------
+    // Permissoes
 
     private fun checkPermissions() =
         ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED &&
@@ -292,12 +305,29 @@ class MainActivity : AppCompatActivity() {
         ActivityCompat.requestPermissions(this, p.toTypedArray(), permissionCode)
     }
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == permissionCode &&
-            grantResults.size >= 2 &&
-            grantResults[0] == PackageManager.PERMISSION_GRANTED &&
-            grantResults[1] == PackageManager.PERMISSION_GRANTED)
-            startAndBindService()
+        if (requestCode != permissionCode) return
+
+        val cameraOk = grantResults.getOrNull(0) == PackageManager.PERMISSION_GRANTED
+        val audioOk  = grantResults.getOrNull(1) == PackageManager.PERMISSION_GRANTED
+
+        if (cameraOk && audioOk) {
+            // Permissoes concedidas: inicializa UI completa
+            initializeUI()
+        } else {
+            // Permissoes negadas: dialogo de retry ou fechar
+            AlertDialog.Builder(this)
+                .setTitle("Permissoes necessarias")
+                .setMessage("Camera e microfone sao obrigatorios para o CamStreamer funcionar.")
+                .setPositiveButton("Tentar novamente") { _, _ -> requestPermissions() }
+                .setNegativeButton("Fechar") { _, _ -> finish() }
+                .setCancelable(false)
+                .show()
+        }
     }
 }
