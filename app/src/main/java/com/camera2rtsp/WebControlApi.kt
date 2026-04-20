@@ -160,24 +160,20 @@ object WebControlApi {
                 json, object : TypeToken<Map<String, Any>>() {}.type
             )
 
-            // Acoes de stream
+            // Acoes de stream — delegadas ao Camera2Controller para rodar no worker
+            // thread serializado, evitando race condition com stop/start de resolucao.
             (params["streamAction"] as? String)?.let { action ->
-                val svc = StreamingService.instance
                 when (action) {
-                    "start"   -> svc?.startStream()
-                    "stop"    -> svc?.stopStream()
-                    "restart" -> svc?.let { it.stopStream(); it.startStream() }
+                    "start"   -> cameraController.streamStart()
+                    "stop"    -> cameraController.streamStop()
+                    "restart" -> cameraController.streamRestart()
                 }
                 return okJson("""{"status":"ok","action":"$action"}""")
             }
 
-            // Troca de URL RTMP
+            // Troca de URL RTMP — serializada tambem no worker
             (params["rtmpUrl"] as? String)?.let { newUrl ->
-                StreamingService.instance?.let { svc ->
-                    svc.rtmpUrl = newUrl
-                    svc.stopStream()
-                    svc.startStream()
-                }
+                cameraController.setRtmpUrlAndRestart(newUrl)
             }
 
             // Troca de camera - invalida cache de capabilities
