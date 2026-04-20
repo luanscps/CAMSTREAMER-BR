@@ -243,10 +243,9 @@ class MainActivity : AppCompatActivity() {
             if (streaming) R.drawable.bg_shutter_active else R.drawable.bg_shutter_inner
         )
 
-        // Fix 2: clientsBadge — browsers com painel aberto
-        val clients = service?.httpServer?.let {
-            if (it.isAlive) it.connectedClients else 0
-        } ?: 0
+        // Fix 2: clientsBadge — tipo explícito evita ambiguidade de inferência no Kotlin
+        val httpServer: WebControlServer? = service?.httpServer
+        val clients = if (httpServer != null && httpServer.isAlive) httpServer.connectedClients else 0
         clientsBadge.text = if (clients > 0) "\uD83D\uDDA5 $clients" else "\uD83D\uDDA5 0"
         clientsBadge.alpha = if (clients > 0) 1f else 0.4f
 
