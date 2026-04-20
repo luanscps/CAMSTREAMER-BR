@@ -30,6 +30,7 @@ var _rggbEnabled=false;
 var _toastTimer;
 var _pollFail=0;
 var _pollCtrl=null;
+var _isStreaming=false;
 
 var _brT,_zT,_fT,_iT,_eT,_shT,_frT;
 var _rgT_R,_rgT_Gr,_rgT_Gb,_rgT_B;
@@ -332,9 +333,7 @@ function setResolutionProfile(res,fps,btn){
     msg+=' · '+fps+'fps';
   }
 
-  var wasStreaming=false;
-  var streamLabel=document.getElementById('lbl-stream');
-  if(streamLabel&&streamLabel.textContent==='AO VIVO')wasStreaming=true;
+  var wasStreaming=_isStreaming;
 
   return sendControl(payload,btn,msg)
     .then(function(){
@@ -546,6 +545,8 @@ function setText(id,val){var el=document.getElementById(id);if(el)el.textContent
 function setClass(id,cls){var el=document.getElementById(id);if(el){el.className='mc-val';if(cls)el.classList.add(cls);}}
 
 function applyStatus(s){
+  _isStreaming=!!s.streaming;
+
   var dot=document.getElementById('dot-stream');
   var lbl=document.getElementById('lbl-stream');
   if(s.streaming){
@@ -634,6 +635,7 @@ function pollStatus(){
       if(e.name==='AbortError')return;
       _pollFail++;
       if(_pollFail>3){
+        _isStreaming=false;
         var lbl=document.getElementById('lbl-stream');
         if(lbl)lbl.textContent='Sem conexão';
         var dot=document.getElementById('dot-stream');
