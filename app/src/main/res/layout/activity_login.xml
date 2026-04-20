@@ -26,15 +26,63 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="Faça login para continuar"
+            android:text="Faca login para continuar"
             android:textColor="#888888"
             android:textSize="14sp" />
+
+        <!-- Card: painel web acessivel antes do login -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="32dp"
+            android:background="@drawable/bg_edit_text"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Painel Web disponivel em:"
+                android:textColor="#888888"
+                android:textSize="12sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/tvWebPanelUrl"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Buscando IP..."
+                    android:textColor="#E53935"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:fontFamily="monospace" />
+
+                <TextView
+                    android:id="@+id/btnCopyUrl"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:padding="6dp"
+                    android:text="Copiar"
+                    android:textColor="#E53935"
+                    android:textSize="12sp"
+                    android:background="?attr/selectableItemBackground" />
+
+            </LinearLayout>
+        </LinearLayout>
 
         <EditText
             android:id="@+id/editEmail"
             android:layout_width="match_parent"
             android:layout_height="52dp"
-            android:layout_marginTop="48dp"
+            android:layout_marginTop="32dp"
             android:background="@drawable/bg_edit_text"
             android:hint="E-mail"
             android:inputType="textEmailAddress"
@@ -83,7 +131,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
             android:padding="8dp"
-            android:text="Não tem conta? Cadastre-se"
+            android:text="Nao tem conta? Cadastre-se"
             android:textColor="#E53935"
             android:textSize="14sp" />
 

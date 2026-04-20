@@ -60,7 +60,7 @@ class RegisterActivity : AppCompatActivity() {
             return
         }
         if (password != confirm) {
-            toast("As senhas não coincidem")
+            toast("As senhas nao coincidem")
             return
         }
         if (password.length < 6) {

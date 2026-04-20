@@ -4,7 +4,7 @@ import android.content.Context
 import com.camera2rtsp.auth.SessionManager
 import fi.iki.elonen.NanoHTTPD
 
-/*
+/**
  * WebControlServer (NanoHTTPD)
  *
  * Inicia ANTES do login Supabase - rotas publicas sao servidas sem cookie.

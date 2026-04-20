@@ -22,7 +22,7 @@
             android:textSize="22sp"
             android:textStyle="bold" />
 
-        <!-- Campo Nome Completo (novo) -->
+        <!-- Campo Nome Completo -->
         <EditText
             android:id="@+id/editFullName"
             android:layout_width="match_parent"
@@ -104,7 +104,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
             android:padding="8dp"
-            android:text="Já tem conta? Entrar"
+            android:text="Ja tem conta? Entrar"
             android:textColor="#E53935"
             android:textSize="14sp" />
 

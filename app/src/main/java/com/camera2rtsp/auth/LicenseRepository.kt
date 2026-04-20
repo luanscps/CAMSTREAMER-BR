@@ -39,8 +39,12 @@ object LicenseRepository {
         }
 
     // Cadastro
-    // @param fullName nome completo enviado como user_metadata ao Supabase Auth
 
+    /**
+     * @param fullName nome completo enviado como user_metadata ao Supabase Auth
+     *                 (persiste em auth.users.raw_user_meta_data e em profiles.full_name
+     *                  via trigger/RPC no painel).
+     */
     suspend fun register(
         email: String,
         password: String,
