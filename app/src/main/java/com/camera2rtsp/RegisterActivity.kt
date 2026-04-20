@@ -16,6 +16,7 @@ import kotlinx.coroutines.launch
 
 class RegisterActivity : AppCompatActivity() {
 
+    private lateinit var editFullName: EditText
     private lateinit var editEmail: EditText
     private lateinit var editPassword: EditText
     private lateinit var editPasswordConfirm: EditText
@@ -27,6 +28,7 @@ class RegisterActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_register)
 
+        editFullName        = findViewById(R.id.editFullName)
         editEmail           = findViewById(R.id.editEmail)
         editPassword        = findViewById(R.id.editPassword)
         editPasswordConfirm = findViewById(R.id.editPasswordConfirm)
@@ -43,10 +45,16 @@ class RegisterActivity : AppCompatActivity() {
     }
 
     private fun doRegister() {
+        val fullName = editFullName.text.toString().trim()
         val email    = editEmail.text.toString().trim()
         val password = editPassword.text.toString()
         val confirm  = editPasswordConfirm.text.toString()
 
+        if (fullName.isEmpty()) {
+            toast("Informe seu nome completo")
+            editFullName.requestFocus()
+            return
+        }
         if (email.isEmpty() || password.isEmpty()) {
             toast("Preencha todos os campos")
             return
@@ -62,7 +70,7 @@ class RegisterActivity : AppCompatActivity() {
 
         setLoading(true)
         lifecycleScope.launch {
-            when (val result = LicenseRepository.register(email, password, applicationContext)) {
+            when (val result = LicenseRepository.register(email, password, fullName, applicationContext)) {
                 is AuthResult.Success -> {
                     setLoading(false)
                     startActivity(Intent(this@RegisterActivity, MainActivity::class.java))

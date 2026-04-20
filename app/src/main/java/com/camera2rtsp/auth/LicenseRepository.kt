@@ -27,7 +27,6 @@ object LicenseRepository {
                 if (resp.isSuccessful) {
                     val token = resp.body()?.accessToken
                         ?: return@withContext AuthResult.Error("Token nao recebido")
-                    // Salva token Supabase para re-activate futuro
                     SessionManager.saveSupabaseToken(token)
                     activate(token, context)
                 } else {
@@ -41,12 +40,26 @@ object LicenseRepository {
 
     // ── Cadastro ──────────────────────────────────────────────────────────────
 
-    suspend fun register(email: String, password: String, context: Context): AuthResult<String> =
+    /**
+     * @param fullName nome completo enviado como user_metadata ao Supabase Auth
+     *                 (persiste em auth.users.raw_user_meta_data e em profiles.full_name
+     *                  via trigger/RPC no painel).
+     */
+    suspend fun register(
+        email: String,
+        password: String,
+        fullName: String,
+        context: Context
+    ): AuthResult<String> =
         withContext(Dispatchers.IO) {
             try {
                 val resp = ApiClient.supabaseAuth.signUp(
                     apiKey = ApiClient.SUPABASE_ANON_KEY,
-                    body   = SupabaseSignUpRequest(email, password)
+                    body   = SupabaseSignUpRequest(
+                        email    = email,
+                        password = password,
+                        data     = mapOf("full_name" to fullName)
+                    )
                 )
                 if (resp.isSuccessful) {
                     val token = resp.body()?.accessToken

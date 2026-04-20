@@ -22,11 +22,26 @@
             android:textSize="22sp"
             android:textStyle="bold" />
 
+        <!-- Campo Nome Completo (novo) -->
+        <EditText
+            android:id="@+id/editFullName"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginTop="40dp"
+            android:background="@drawable/bg_edit_text"
+            android:hint="Nome completo"
+            android:inputType="textPersonName|textCapWords"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#888888"
+            android:textSize="15sp" />
+
         <EditText
             android:id="@+id/editEmail"
             android:layout_width="match_parent"
             android:layout_height="52dp"
-            android:layout_marginTop="40dp"
+            android:layout_marginTop="16dp"
             android:background="@drawable/bg_edit_text"
             android:hint="E-mail"
             android:inputType="textEmailAddress"
