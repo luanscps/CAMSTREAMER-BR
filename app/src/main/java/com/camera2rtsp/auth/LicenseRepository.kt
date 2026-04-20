@@ -15,7 +15,7 @@ sealed class AuthResult<out T> {
 
 object LicenseRepository {
 
-    // ── Login ─────────────────────────────────────────────────────────────────
+    // Login
 
     suspend fun login(email: String, password: String, context: Context): AuthResult<String> =
         withContext(Dispatchers.IO) {
@@ -38,13 +38,9 @@ object LicenseRepository {
             }
         }
 
-    // ── Cadastro ──────────────────────────────────────────────────────────────
+    // Cadastro
+    // @param fullName nome completo enviado como user_metadata ao Supabase Auth
 
-    /**
-     * @param fullName nome completo enviado como user_metadata ao Supabase Auth
-     *                 (persiste em auth.users.raw_user_meta_data e em profiles.full_name
-     *                  via trigger/RPC no painel).
-     */
     suspend fun register(
         email: String,
         password: String,
@@ -75,7 +71,7 @@ object LicenseRepository {
             }
         }
 
-    // ── Ativar device (POST /api/activate) ────────────────────────────────────
+    // Ativar device (POST /api/activate)
 
     suspend fun activate(jwtToken: String, context: Context): AuthResult<String> {
         val androidId = Settings.Secure.getString(
@@ -116,7 +112,7 @@ object LicenseRepository {
         }
     }
 
-    // ── Re-activate automatico ao detectar nova versao do app ─────────────────
+    // Re-activate automatico ao detectar nova versao do app
 
     suspend fun reactivateIfVersionChanged(context: Context): Boolean {
         val appVersion   = context.packageManager
@@ -133,7 +129,7 @@ object LicenseRepository {
         } catch (_: Exception) { false }
     }
 
-    // ── Validar licenca (GET /api/license/validate) ───────────────────────────
+    // Validar licenca (GET /api/license/validate)
 
     suspend fun validateLicense(): AuthResult<LicenseValidateResponse> =
         withContext(Dispatchers.IO) {
@@ -153,7 +149,7 @@ object LicenseRepository {
             }
         }
 
-    // ── Ler cameras via Camera2 API ────────────────────────────────────────────
+    // Ler cameras via Camera2 API
 
     private fun readCameraInfoList(context: Context): List<CameraInfo> {
         return try {
@@ -185,7 +181,7 @@ object LicenseRepository {
         }
     }
 
-    // ── Helper ────────────────────────────────────────────────────────────────
+    // Helper
 
     private fun parseSupabaseError(body: String): String {
         return try {

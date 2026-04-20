@@ -44,7 +44,7 @@ object SessionManager {
         if (plan == "PRO") features = PlanFeatures.pro()
     }
 
-    // ── sub_license_key ──────────────────────────────────────────────────────
+    // sub_license_key
 
     fun saveSubLicenseKey(key: String) {
         requirePrefs().edit().putString(KEY_SUB_LICENSE, key).apply()
@@ -69,7 +69,7 @@ object SessionManager {
         plan = "BASIC"
     }
 
-    // ── Features ─────────────────────────────────────────────────────────────
+    // Features
 
     fun setFeaturesFromResponse(response: LicenseValidateResponse) {
         features = response.features ?: PlanFeatures.basic()
@@ -83,7 +83,7 @@ object SessionManager {
         requirePrefs().edit().putString(KEY_PLAN, plan).apply()
     }
 
-    // ── App Version ──────────────────────────────────────────────────────────
+    // App Version
 
     fun saveAppVersion(version: String) {
         requirePrefs().edit().putString(KEY_APP_VERSION, version).apply()
@@ -92,7 +92,7 @@ object SessionManager {
     fun getAppVersion(): String? =
         requirePrefs().getString(KEY_APP_VERSION, null)
 
-    // ── Supabase Token ───────────────────────────────────────────────────────
+    // Supabase Token
 
     fun saveSupabaseToken(token: String) {
         requirePrefs().edit().putString(KEY_SUPABASE_TOKEN, token).apply()
@@ -101,7 +101,7 @@ object SessionManager {
     fun getSupabaseToken(): String? =
         requirePrefs().getString(KEY_SUPABASE_TOKEN, null)
 
-    // ── WebGUI — Senha local ─────────────────────────────────────────────────
+    // WebGUI - Senha local
 
     fun setWebPassword(password: String) {
         requirePrefs().edit().putString(KEY_WEB_PASSWORD, password).apply()
@@ -116,7 +116,7 @@ object SessionManager {
         return saved == input
     }
 
-    // ── WebGUI — Session Token ───────────────────────────────────────────────
+    // WebGUI - Session Token
 
     fun createWebSession(): String {
         val token   = UUID.randomUUID().toString()
@@ -142,7 +142,7 @@ object SessionManager {
             .apply()
     }
 
-    // ── Helper ────────────────────────────────────────────────────────────────
+    // Helper
 
     private fun requirePrefs(): SharedPreferences =
         checkNotNull(prefs) {

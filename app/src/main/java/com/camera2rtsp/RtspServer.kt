@@ -6,14 +6,14 @@ import com.pedro.common.ConnectChecker
 import com.pedro.encoder.input.video.CameraHelper
 import com.pedro.library.rtsp.RtspCamera2
 
-/**
+/*
  * Wrapper RTSP usando RtspCamera2 (push para servidor externo).
  *
  * O modulo rtsp-server nao existe como artefato no JitPack.
  * A solucao e usar RtspCamera2 para fazer push para o MediaMTX,
  * que entao serve o stream RTSP para os clientes:
  *
- *   Celular --> push RTSP --> MediaMTX --> clientes assistem via rtsp://...
+ *   Celular -> push RTSP -> MediaMTX -> clientes assistem via rtsp://...
  *
  * URL de push padrao: rtsp://ip-do-servidor:8554/live
  */
@@ -32,16 +32,14 @@ class RtspServer(
     val isStreaming: Boolean get() = camera?.isStreaming == true
     val isOnPreview: Boolean get() = camera?.isOnPreview == true
 
-    /** Inicializa em modo background (sem view de preview). */
+    // Inicializa em modo background (sem view de preview)
     fun initBackground() {
         camera = RtspCamera2(context, this)
         Log.i(tag, "RtspCamera2 inicializado (modo background)")
     }
 
-    /**
-     * Prepara o encoder e inicia o push RTSP para o servidor externo.
-     * @param url ex: "rtsp://192.168.1.100:8554/live"
-     */
+    // Prepara o encoder e inicia o push RTSP para o servidor externo
+    // @param url ex: "rtsp://192.168.1.100:8554/live"
     fun start(url: String) {
         val cam = camera ?: run { Log.e(tag, "initBackground() nao chamado"); return }
         if (cam.isStreaming) { Log.d(tag, "ja streaming"); return }
@@ -77,7 +75,7 @@ class RtspServer(
         } catch (e: Exception) { Log.e(tag, "Erro ao parar", e) }
     }
 
-    // -- ConnectChecker -------------------------------------------------------
+    // ConnectChecker
     override fun onConnectionStarted(url: String)  { Log.d(tag, "onConnectionStarted: $url") }
     override fun onConnectionSuccess()              { connectedClients = 1; Log.i(tag, "RTSP conectado") }
     override fun onConnectionFailed(reason: String) { Log.e(tag, "RTSP falhou: $reason") }
