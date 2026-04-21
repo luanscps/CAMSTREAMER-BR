@@ -67,6 +67,8 @@ class Camera2Controller {
     private fun post(block: () -> Unit) =
         worker.post { runCatching(block).onFailure { Log.e(tag, "worker error", it) } }
 
+    private val monitorRetryDelaysMs = longArrayOf(300L, 800L, 2000L)
+
     private val reflField_cameraManager: java.lang.reflect.Field? by lazy {
         runCatching {
             Camera2Base::class.java.getDeclaredField("cameraManager")
@@ -92,9 +94,69 @@ class Camera2Controller {
         }.onFailure { Log.e(tag, "setCustomRequest falhou", it) }.getOrElse { false }
     }
 
-    fun initLiveMonitor() {
-        val cam2mgr = getCam2Manager() ?: run {
-            Log.w(tag, "[liveMonitor] getCam2Manager nulo - abortando")
+    fun streamStart() {
+        post {
+            val cam = rtmpCamera ?: return@post
+            val url = StreamingService.instance?.rtmpUrl.orEmpty()
+            if (url.isBlank()) {
+                Log.w(tag, "streamStart ignorado: RTMP URL vazia")
+                return@post
+            }
+            if (!cam.isStreaming) {
+                cam.startStream(url)
+                Log.i(tag, "streamStart ok")
+            }
+        }
+    }
+
+    fun streamStop() {
+        post {
+            val cam = rtmpCamera ?: return@post
+            if (cam.isStreaming) {
+                cam.stopStream()
+                Log.i(tag, "streamStop ok")
+            }
+        }
+    }
+
+    fun streamRestart() {
+        post {
+            val cam = rtmpCamera ?: return@post
+            val url = StreamingService.instance?.rtmpUrl.orEmpty()
+            if (url.isBlank()) {
+                Log.w(tag, "streamRestart ignorado: RTMP URL vazia")
+                return@post
+            }
+            if (cam.isStreaming) cam.stopStream()
+            cam.startStream(url)
+            Log.i(tag, "streamRestart ok")
+        }
+    }
+
+    fun setRtmpUrlAndRestart(url: String) {
+        post {
+            val cam = rtmpCamera ?: return@post
+            StreamingService.instance?.rtmpUrl = url
+            if (cam.isStreaming) cam.stopStream()
+            if (url.isNotBlank()) {
+                cam.startStream(url)
+                Log.i(tag, "setRtmpUrlAndRestart ok")
+            } else {
+                Log.w(tag, "setRtmpUrlAndRestart: URL vazia, stream mantido parado")
+            }
+        }
+    }
+
+    fun initLiveMonitor(attempt: Int = 0) {
+        val cam2mgr = getCam2Manager()
+        if (cam2mgr == null) {
+            if (attempt >= monitorRetryDelaysMs.size) {
+                Log.w(tag, "[liveMonitor] getCam2Manager nulo apos retries - abortando")
+                return
+            }
+            val delay = monitorRetryDelaysMs[attempt]
+            Log.w(tag, "[liveMonitor] getCam2Manager nulo - retry em ${delay}ms (tentativa ${attempt + 1})")
+            worker.postDelayed({ initLiveMonitor(attempt + 1) }, delay)
             return
         }
         runCatching {
@@ -157,21 +219,15 @@ class Camera2Controller {
         }
     }
 
-    private fun applyRggbGains(cam: RtmpCamera2) {
+    private fun applyRggbGains() {
         post {
-            val ok = runCatching {
-                cam.disableAutoWhiteBalance()
-                cam.setColorCorrectionGains(rggbGains[0], rggbGains[1], rggbGains[2], rggbGains[3])
-            }.getOrElse {
-                Log.w(tag, "setColorCorrectionGains falhou, fallback custom request", it)
-                setCustomRequest { b ->
-                    b.set(CaptureRequest.CONTROL_AWB_MODE, CameraMetadata.CONTROL_AWB_MODE_OFF)
-                    val rggb = android.hardware.camera2.params.RggbChannelVector(
-                        rggbGains[0], rggbGains[1], rggbGains[2], rggbGains[3]
-                    )
-                    b.set(CaptureRequest.COLOR_CORRECTION_MODE, CameraMetadata.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX)
-                    b.set(CaptureRequest.COLOR_CORRECTION_GAINS, rggb)
-                }
+            val gains = android.hardware.camera2.params.RggbChannelVector(
+                rggbGains[0], rggbGains[1], rggbGains[2], rggbGains[3]
+            )
+            val ok = setCustomRequest { b ->
+                b.set(CaptureRequest.CONTROL_AWB_MODE, CameraMetadata.CONTROL_AWB_MODE_OFF)
+                b.set(CaptureRequest.COLOR_CORRECTION_MODE, CameraMetadata.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX)
+                b.set(CaptureRequest.COLOR_CORRECTION_GAINS, gains)
             }
             Log.d(tag, "rggbGains ok=$ok R=${rggbGains[0]} Gr=${rggbGains[1]} Gb=${rggbGains[2]} B=${rggbGains[3]}")
         }
@@ -460,7 +516,7 @@ class Camera2Controller {
             whiteBalanceMode = "auto"
             Log.d(tag, "rggbReset")
         }
-        if (rggbDirty) applyRggbGains(cam)
+        if (rggbDirty) applyRggbGains()
 
         params["zoom"]?.let {
             val z = when (it) {
@@ -732,7 +788,6 @@ class Camera2Controller {
                 }
             } ?: emptyList()
 
-            // Scene Modes (17 = HIGH_SPEED_VIDEO, deprecated como constante no Android 12+)
             val sceneModes = ch.get(CameraCharacteristics.CONTROL_AVAILABLE_SCENE_MODES)?.map {
                 when (it) {
                     CameraMetadata.CONTROL_SCENE_MODE_DISABLED       -> "disabled"
@@ -757,7 +812,6 @@ class Camera2Controller {
                 }
             }?.filter { it != "disabled" } ?: emptyList()
 
-            // Effect Modes
             val effectModes = ch.get(CameraCharacteristics.CONTROL_AVAILABLE_EFFECTS)?.map {
                 when (it) {
                     CameraMetadata.CONTROL_EFFECT_MODE_OFF        -> "off"
@@ -773,7 +827,6 @@ class Camera2Controller {
                 }
             }?.filter { it != "off" } ?: emptyList()
 
-            // Focus Distance Calibration
             val focusCalibration = when (ch.get(CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION)) {
                 CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION_CALIBRATED  -> "CALIBRATED"
                 CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION_APPROXIMATE -> "APPROXIMATE"
@@ -802,7 +855,6 @@ class Camera2Controller {
                 else                            -> "Cam $id"
             }
 
-            // Campos novos de CameraCapabilities
             val pixelArraySize   = ch.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)
             val sensorPixelArr   = pixelArraySize?.let { listOf(it.width, it.height) }
             val physicalSize     = ch.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
