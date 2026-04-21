@@ -1,17 +1,16 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>CamStreamer BR</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <title>CamStreamer BR</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<!-- ── Top Nav ──────────────────────────────────────────── -->
 <nav class="topnav">
   <span class="topnav-brand">Cam<span>Streamer</span> BR</span>
   <div class="topnav-badges">
@@ -19,16 +18,15 @@
     <div class="badge">BR <span id="lbl-br">-</span> kbps</div>
     <div class="badge">Lat <span id="lbl-lat" class="lat-ok">-</span></div>
     <div class="badge" id="badge-manual" style="display:none">Manual</div>
-    <div class="badge" id="badge-rggb"   style="display:none">RGGB</div>
+    <div class="badge" id="badge-rggb" style="display:none">RGGB</div>
+    <div class="badge" id="badge-highspeed" style="display:none">High-Speed</div>
   </div>
-  <span class="topnav-meta">Camera2 &middot; RootEncoder &middot; v5-CAMUI</span>
+  <span class="topnav-meta">Camera2 · RootEncoder · NanoHTTPD · v6-WebGUI</span>
 </nav>
 
 <div class="app-shell">
 
-  <!-- ── Sidebar ───────────────────────────────────────── -->
   <aside class="sidebar">
-
     <span class="sidebar-label">Stream</span>
     <div class="card">
       <h3>RTMP</h3>
@@ -40,9 +38,9 @@
         <button class="btn-start" onclick="applyRtmpUrl(this)">OK</button>
       </div>
       <div class="stream-actions">
-        <button class="btn-start"   onclick="streamAction('start',this)">Iniciar</button>
+        <button class="btn-start" onclick="streamAction('start',this)">Iniciar</button>
         <button class="btn-restart" onclick="streamAction('restart',this)">Reiniciar</button>
-        <button class="btn-stop"    onclick="streamAction('stop',this)">Parar</button>
+        <button class="btn-stop" onclick="streamAction('stop',this)">Parar</button>
       </div>
     </div>
 
@@ -53,7 +51,7 @@
         <div class="info-pill">Cam <span id="lbl-cam">-</span></div>
         <div class="info-pill">Res <span id="lbl-res">-</span></div>
         <div class="info-pill">FPS <span id="info-fps">-</span></div>
-        <div class="info-pill">WB  <span id="info-wb">-</span></div>
+        <div class="info-pill">WB <span id="info-wb">-</span></div>
         <div class="info-pill">OIS <span id="info-ois">-</span></div>
         <div class="info-pill">EIS <span id="info-eis">-</span></div>
         <div class="info-pill">Foco <span id="info-focusmode">-</span></div>
@@ -69,25 +67,38 @@
       </div>
     </div>
 
-    <span class="sidebar-label">Camera</span>
+    <span class="sidebar-label">Câmera</span>
     <div class="card" id="card-camera">
       <h3>Lente</h3>
       <div class="btngroup" id="btngroup-camera">Carregando...</div>
     </div>
 
     <div class="card hidden" id="card-optical-zoom">
-      <h3>Zoom Optico <span class="val orange" id="optical-zoom-val">Auto</span></h3>
-      <p style="font-size:11px;color:var(--muted);margin-bottom:10px">Troca a lente fisica. Sem perda de qualidade.</p>
+      <h3>Zoom Óptico <span class="val orange" id="optical-zoom-val">Auto</span></h3>
+      <p class="muted-help">Troca a lente física. Sem perda de qualidade.</p>
       <div class="btngroup" id="btngroup-optical-zoom"></div>
     </div>
 
+    <div class="card" id="card-lens-tech">
+      <h3>Lente / Sensor</h3>
+      <div class="spec-grid">
+        <div class="spec-item"><span>Nome</span><strong id="lens-name">-</strong></div>
+        <div class="spec-item"><span>Facing</span><strong id="lens-facing">-</strong></div>
+        <div class="spec-item"><span>Calibração foco</span><strong id="lens-focus-cal">-</strong></div>
+        <div class="spec-item"><span>Min focus</span><strong id="lens-min-focus">-</strong></div>
+        <div class="spec-item"><span>Focais</span><strong id="lens-focals">-</strong></div>
+        <div class="spec-item"><span>Aberturas</span><strong id="lens-apertures">-</strong></div>
+        <div class="spec-item"><span>Sensor px</span><strong id="sensor-px">-</strong></div>
+        <div class="spec-item"><span>Sensor mm</span><strong id="sensor-mm">-</strong></div>
+        <div class="spec-item"><span>Orientação</span><strong id="sensor-orientation">-</strong></div>
+        <div class="spec-item"><span>Timestamp</span><strong id="sensor-ts">-</strong></div>
+      </div>
+    </div>
   </aside>
 
-  <!-- ── Main ──────────────────────────────────────────── -->
   <main class="main">
 
-    <!-- Monitor Ao Vivo -->
-    <p class="section-title">Monitor Ao Vivo <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted2)">(TotalCaptureResult)</span></p>
+    <p class="section-title">Monitor Ao Vivo <span class="section-sub">(TotalCaptureResult)</span></p>
     <div class="card" id="card-monitor">
       <div class="monitor-grid">
         <div class="monitor-cell"><div class="mc-label">ISO Real</div><div class="mc-val" id="mon-iso">-</div></div>
@@ -101,12 +112,11 @@
       </div>
     </div>
 
-    <!-- Resolucao + Bitrate -->
     <p class="section-title">Encode</p>
     <div class="cards-grid">
       <div class="card">
         <h3>Resolução + FPS</h3>
-        <div class="btngroup" id="btngroup-resolution" style="margin-bottom:0"></div>
+        <div class="btngroup" id="btngroup-resolution"></div>
       </div>
       <div class="card">
         <h3>Bitrate <span class="val" id="br-value">4000</span> kbps</h3>
@@ -123,36 +133,51 @@
       </div>
     </div>
 
-    <!-- Zoom -->
     <p class="section-title">Zoom</p>
-    <div class="card" id="card-zoom">
-      <h3>Zoom Digital <span class="val" id="zoom-val">1x</span></h3>
-      <div class="slider-wrap">
-        <input type="range" id="zoom" min="0" max="1" value="0" step="0.01" oninput="updateZoom(this.value)">
-        <div class="rlabels"><span>1x</span><span>Max</span></div>
+    <div class="cards-grid">
+      <div class="card" id="card-zoom">
+        <h3>Zoom Digital <span class="val" id="zoom-val">1x</span></h3>
+        <div class="slider-wrap">
+          <input type="range" id="zoom" min="0" max="1" value="0" step="0.01" oninput="updateZoom(this.value)">
+          <div class="rlabels"><span id="zoom-min-label">1x</span><span id="zoom-max-label">Max</span></div>
+        </div>
+        <div class="btngroup" style="margin-top:8px">
+          <button onclick="setZoomPreset(0)">1x</button>
+          <button onclick="setZoomPreset(0.25)">2x</button>
+          <button onclick="setZoomPreset(0.5)">4x</button>
+          <button onclick="setZoomPreset(1.0)">Max</button>
+        </div>
       </div>
-      <div class="btngroup" style="margin-top:8px">
-        <button onclick="setZoomPreset(0)">1x</button>
-        <button onclick="setZoomPreset(0.25)">2x</button>
-        <button onclick="setZoomPreset(0.5)">4x</button>
-        <button onclick="setZoomPreset(1.0)">Max</button>
+
+      <div class="card" id="card-camera-capabilities">
+        <h3>Capacidades</h3>
+        <div class="spec-grid">
+          <div class="spec-item"><span>Hardware</span><strong id="cap-hw">-</strong></div>
+          <div class="spec-item"><span>Manual sensor</span><strong id="cap-manual">-</strong></div>
+          <div class="spec-item"><span>Post-proc</span><strong id="cap-postproc">-</strong></div>
+          <div class="spec-item"><span>RAW</span><strong id="cap-raw">-</strong></div>
+          <div class="spec-item"><span>Burst</span><strong id="cap-burst">-</strong></div>
+          <div class="spec-item"><span>Depth</span><strong id="cap-depth">-</strong></div>
+          <div class="spec-item"><span>Logical multi-cam</span><strong id="cap-logical">-</strong></div>
+          <div class="spec-item"><span>60fps+</span><strong id="cap-60fps">-</strong></div>
+          <div class="spec-item"><span>High-speed</span><strong id="cap-highspeed">-</strong></div>
+          <div class="spec-item"><span>Crop type</span><strong id="cap-crop">-</strong></div>
+        </div>
       </div>
     </div>
 
-    <!-- Foco -->
     <p class="section-title">Foco</p>
     <div class="card" id="card-focus">
       <h3>Foco <span class="val" id="focus-val">Auto</span></h3>
       <div class="slider-wrap">
         <input type="range" id="focus" min="0" max="10" value="0" step="0.1" oninput="updateFocus(this.value)">
-        <div class="rlabels"><span>Auto / inf</span><span>Macro (10D)</span></div>
+        <div class="rlabels"><span>Auto / inf</span><span>Macro</span></div>
       </div>
       <div class="btngroup" style="margin-top:8px" id="btngroup-focusmode"></div>
       <button style="width:100%;margin-top:10px" onclick="triggerAF(this)">Tocar para Focar (AF)</button>
     </div>
 
-    <!-- Exposicao -->
-    <p class="section-title">Exposicao</p>
+    <p class="section-title">Exposição</p>
     <div class="cards-grid">
       <div class="card" id="card-iso">
         <h3>ISO <span class="val" id="iso-val">50</span></h3>
@@ -165,6 +190,7 @@
           <label class="switch"><input type="checkbox" id="toggle-manual" onchange="toggleManual(this)"><span class="sw"></span></label>
         </div>
       </div>
+
       <div class="card" id="card-ev">
         <h3>EV <span class="val" id="ev-val">0</span></h3>
         <div class="slider-wrap">
@@ -182,6 +208,7 @@
           <label class="switch"><input type="checkbox" id="toggle-ae-lock" onchange="toggleAELock(this)"><span class="sw"></span></label>
         </div>
       </div>
+
       <div class="card hidden" id="card-shutter">
         <h3>Shutter <span class="val manual" id="shutter-val">1/50s</span></h3>
         <div class="slider-wrap">
@@ -199,6 +226,7 @@
           <button onclick="setShutterPreset('1/1000')">1/1000</button>
         </div>
       </div>
+
       <div class="card hidden" id="card-frame">
         <h3>Frame Time <span class="val manual" id="frame-val">1/30s</span></h3>
         <div class="slider-wrap">
@@ -211,24 +239,23 @@
           <button onclick="setFramePreset(2)">1/30</button>
           <button onclick="setFramePreset(3)">1/60</button>
         </div>
-        <p style="font-size:10px;color:var(--muted);margin-top:8px">Frame Duration define o FPS maximo do sensor.</p>
       </div>
     </div>
 
-    <!-- White Balance -->
     <p class="section-title">White Balance</p>
     <div class="cards-grid">
       <div class="card" id="card-wb">
-        <h3>Balanco de Branco</h3>
+        <h3>Balanço de Branco</h3>
         <div class="btngroup" id="btngroup-wb"></div>
         <div class="toggle-row" style="margin-top:8px">
           <span class="toggle-label">Travar AWB</span>
           <label class="switch"><input type="checkbox" id="toggle-awb-lock" onchange="toggleAWBLock(this)"><span class="sw"></span></label>
         </div>
       </div>
+
       <div class="card" id="card-rggb">
         <h3>RGGB Manual <span class="val orange" id="rggb-status">Off</span></h3>
-        <p style="font-size:11px;color:var(--muted);margin-bottom:12px">Ganho por canal. Sobrescreve AWB quando ativo.</p>
+        <p class="muted-help">Ganho por canal. Sobrescreve AWB quando ativo.</p>
         <div class="rggb-row">
           <span class="rggb-lbl r">R</span>
           <input type="range" class="rggb-slider orange-slider" id="rggb-r" min="10" max="400" value="100" step="1" oninput="updateRggb('R',this.value)">
@@ -260,14 +287,26 @@
       </div>
     </div>
 
-    <!-- Controles + Processamento -->
+    <p class="section-title">Modos / Formatos</p>
+    <div class="cards-grid">
+      <div class="card">
+        <h3>Formatos disponíveis</h3>
+        <div class="chips" id="chips-formats"></div>
+      </div>
+      <div class="card">
+        <h3>Vídeo high-speed</h3>
+        <div class="chips" id="chips-highspeed-sizes"></div>
+        <div class="chips" id="chips-highspeed-fps" style="margin-top:10px"></div>
+      </div>
+    </div>
+
     <p class="section-title">Controles e Processamento</p>
     <div class="cards-grid">
       <div class="card" id="card-extras">
         <h3>Extras</h3>
         <div id="extras-flash"></div>
         <div class="toggle-row" id="row-ois">
-          <span class="toggle-label">OIS (Optica)<span class="ois-no-support" id="ois-hint"></span></span>
+          <span class="toggle-label">OIS (Óptica)<span class="ois-no-support" id="ois-hint"></span></span>
           <label class="switch"><input type="checkbox" id="toggle-ois" onchange="toggleOIS(this)"><span class="sw"></span></label>
         </div>
         <div class="toggle-row" id="row-eis">
@@ -275,44 +314,34 @@
           <label class="switch"><input type="checkbox" id="toggle-eis" onchange="toggleEIS(this)"><span class="sw"></span></label>
         </div>
       </div>
+
       <div class="card hidden postproc-active" id="card-postproc">
         <h3>Processamento</h3>
         <div class="postproc-presets">
           <button class="preset-quality" onclick="applyQualityMax(this)">Qualidade Max</button>
-          <button class="preset-fast" onclick="applyLatencyMin(this)">Latencia Min</button>
+          <button class="preset-fast" onclick="applyLatencyMin(this)">Latência Min</button>
         </div>
+
         <div class="postproc-section">
           <h4>Nitidez (Edge)</h4>
-          <div class="btngroup">
-            <button data-edge="off" onclick="setEdge('off',this)">Off</button>
-            <button data-edge="fast" onclick="setEdge('fast',this)">Rapido</button>
-            <button data-edge="high_quality" onclick="setEdge('high_quality',this)" class="active">Qualidade</button>
-          </div>
+          <div class="btngroup" id="btngroup-edge-modes"></div>
         </div>
+
         <div class="postproc-section">
-          <h4>Reducao de Ruido (NR)</h4>
-          <div class="btngroup">
-            <button data-nr="off" onclick="setNR('off',this)">Off</button>
-            <button data-nr="minimal" onclick="setNR('minimal',this)">Minimo</button>
-            <button data-nr="fast" onclick="setNR('fast',this)">Rapido</button>
-            <button data-nr="high_quality" onclick="setNR('high_quality',this)" class="active">Qualidade</button>
-          </div>
+          <h4>Redução de Ruído</h4>
+          <div class="btngroup" id="btngroup-nr-modes"></div>
         </div>
+
         <div class="postproc-section" style="margin-bottom:0">
           <h4>Pixel Quente</h4>
-          <div class="btngroup">
-            <button data-hotpx="off" onclick="setHotPx('off',this)">Off</button>
-            <button data-hotpx="fast" onclick="setHotPx('fast',this)">Rapido</button>
-            <button data-hotpx="high_quality" onclick="setHotPx('high_quality',this)" class="active">Qualidade</button>
-          </div>
+          <div class="btngroup" id="btngroup-hotpx-modes"></div>
         </div>
       </div>
     </div>
 
     <p style="text-align:center;margin-top:32px;color:var(--muted2);font-size:10px;letter-spacing:0.3px">
-      Camera2 API &middot; RootEncoder &middot; NanoHTTPD &middot; v5-CAMUI
+      Camera2 API · RootEncoder · NanoHTTPD · v6-WebGUI
     </p>
-
   </main>
 </div>
 
