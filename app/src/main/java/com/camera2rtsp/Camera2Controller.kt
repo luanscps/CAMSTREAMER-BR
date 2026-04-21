@@ -53,6 +53,18 @@ class Camera2Controller {
     var rggbEnabled = false
     var rggbGains   = floatArrayOf(1f, 1f, 1f, 1f)
 
+    var yuvProcessorEnabled = false
+    var yuvProcessor: YuvFrameProcessor? = null
+    var yuvFrameCallback: ((YuvFrame) -> Unit)? = null
+
+    var rawCaptureEnabled = false
+    var rawManager: RawCaptureManager? = null
+    var rawFrameCallback: ((RawCaptureManager.RawFrame) -> Unit)? = null
+
+    var depthFusionEnabled = false
+    var depthProcessor: DepthFusionProcessor? = null
+    var depthFrameCallback: ((DepthFrame) -> Unit)? = null
+
     @Volatile var liveIso        = 0
     @Volatile var liveExposureNs = 0L
     @Volatile var liveRggbR      = 1f
@@ -61,6 +73,10 @@ class Camera2Controller {
     @Volatile var liveRggbB      = 1f
     @Volatile var liveAfState    = "unknown"
     @Volatile var liveAeState    = "unknown"
+    @Volatile var lastDepthMeanMm = 0f
+    @Volatile var lastDepthMinMm = 0
+    @Volatile var lastDepthMaxMm = 0
+    @Volatile var lastYuvTimestampNs = 0L
 
     private val workerThread = HandlerThread("CameraWorker").also { it.start() }
     private val worker = Handler(workerThread.looper)
@@ -155,6 +171,100 @@ class Camera2Controller {
             postProcPending = true
             worker.postDelayed(postProcRunnable, 50)
         }
+    }
+
+    fun enableYuvProcessor(width: Int = currentWidth, height: Int = currentHeight, callback: ((YuvFrame) -> Unit)? = null): Boolean {
+        val ctx = appContext ?: return false
+        val caps = discoverAllCameras(ctx).firstOrNull { it.cameraId == currentCameraId } ?: return false
+        if (!caps.supportsYuvImageReader()) {
+            Log.w(tag, "enableYuvProcessor: camera $currentCameraId sem suporte YUV")
+            return false
+        }
+        releaseYuvProcessor()
+        yuvFrameCallback = callback
+        yuvProcessor = YuvFrameProcessor(width, height) { frame ->
+            lastYuvTimestampNs = frame.timestampNs
+            yuvFrameCallback?.invoke(frame)
+        }.also { it.init() }
+        yuvProcessorEnabled = true
+        Log.i(tag, "enableYuvProcessor ok ${width}x${height}")
+        return true
+    }
+
+    fun disableYuvProcessor() {
+        releaseYuvProcessor()
+        yuvFrameCallback = null
+        yuvProcessorEnabled = false
+        Log.i(tag, "disableYuvProcessor ok")
+    }
+
+    fun enableRawCapture(width: Int, height: Int, callback: ((RawCaptureManager.RawFrame) -> Unit)? = null): Boolean {
+        val ctx = appContext ?: return false
+        val caps = discoverAllCameras(ctx).firstOrNull { it.cameraId == currentCameraId } ?: return false
+        if (!caps.isRawCaptureFeasible()) {
+            Log.w(tag, "enableRawCapture: camera $currentCameraId sem suporte RAW viavel")
+            return false
+        }
+        releaseRawManager()
+        rawFrameCallback = callback
+        rawManager = RawCaptureManager(width, height) { frame ->
+            rawFrameCallback?.invoke(frame)
+        }.also { it.init() }
+        rawCaptureEnabled = true
+        Log.i(tag, "enableRawCapture ok ${width}x${height}")
+        return true
+    }
+
+    fun disableRawCapture() {
+        releaseRawManager()
+        rawFrameCallback = null
+        rawCaptureEnabled = false
+        Log.i(tag, "disableRawCapture ok")
+    }
+
+    fun enableDepthFusion(width: Int, height: Int, callback: ((DepthFrame) -> Unit)? = null): Boolean {
+        val ctx = appContext ?: return false
+        val caps = discoverAllCameras(ctx).firstOrNull { it.cameraId == currentCameraId } ?: return false
+        if (!caps.hasUsableDepthSensor() && !caps.supportsYuvDepthFusion()) {
+            Log.w(tag, "enableDepthFusion: camera $currentCameraId sem suporte depth")
+            return false
+        }
+        releaseDepthProcessor()
+        depthFrameCallback = callback
+        depthProcessor = DepthFusionProcessor(width, height) { frame ->
+            lastDepthMeanMm = frame.meanDepthMm
+            lastDepthMinMm = frame.minDepthMm
+            lastDepthMaxMm = frame.maxDepthMm
+            depthFrameCallback?.invoke(frame)
+        }.also { it.init() }
+        depthFusionEnabled = true
+        Log.i(tag, "enableDepthFusion ok ${width}x${height}")
+        return true
+    }
+
+    fun disableDepthFusion() {
+        releaseDepthProcessor()
+        depthFrameCallback = null
+        depthFusionEnabled = false
+        Log.i(tag, "disableDepthFusion ok")
+    }
+
+    private fun releaseYuvProcessor() {
+        runCatching { yuvProcessor?.release() }
+            .onFailure { Log.e(tag, "releaseYuvProcessor falhou", it) }
+        yuvProcessor = null
+    }
+
+    private fun releaseRawManager() {
+        runCatching { rawManager?.release() }
+            .onFailure { Log.e(tag, "releaseRawManager falhou", it) }
+        rawManager = null
+    }
+
+    private fun releaseDepthProcessor() {
+        runCatching { depthProcessor?.release() }
+            .onFailure { Log.e(tag, "releaseDepthProcessor falhou", it) }
+        depthProcessor = null
     }
 
     private fun applyRggbGains(cam: RtmpCamera2) {
@@ -659,6 +769,9 @@ class Camera2Controller {
     }
 
     fun release() {
+        releaseYuvProcessor()
+        releaseRawManager()
+        releaseDepthProcessor()
         worker.removeCallbacks(postProcRunnable)
         workerThread.quitSafely()
         rtmpCamera = null
@@ -731,8 +844,6 @@ class Camera2Controller {
                     else -> "unknown"
                 }
             } ?: emptyList()
-
-            // Scene Modes (17 = HIGH_SPEED_VIDEO, deprecated como constante no Android 12+)
             val sceneModes = ch.get(CameraCharacteristics.CONTROL_AVAILABLE_SCENE_MODES)?.map {
                 when (it) {
                     CameraMetadata.CONTROL_SCENE_MODE_DISABLED       -> "disabled"
@@ -756,8 +867,6 @@ class Camera2Controller {
                     else -> "unknown_$it"
                 }
             }?.filter { it != "disabled" } ?: emptyList()
-
-            // Effect Modes
             val effectModes = ch.get(CameraCharacteristics.CONTROL_AVAILABLE_EFFECTS)?.map {
                 when (it) {
                     CameraMetadata.CONTROL_EFFECT_MODE_OFF        -> "off"
@@ -772,14 +881,11 @@ class Camera2Controller {
                     else -> "unknown_$it"
                 }
             }?.filter { it != "off" } ?: emptyList()
-
-            // Focus Distance Calibration
             val focusCalibration = when (ch.get(CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION)) {
                 CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION_CALIBRATED  -> "CALIBRATED"
                 CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION_APPROXIMATE -> "APPROXIMATE"
                 else                                                                   -> "UNCALIBRATED"
             }
-
             val hasFlash = ch.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
             val hasOis   = ch.get(CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION)
                 ?.contains(CameraCharacteristics.LENS_OPTICAL_STABILIZATION_MODE_ON) ?: false
@@ -801,8 +907,6 @@ class Camera2Controller {
                 facing == "FRONT"               -> "Frontal $id"
                 else                            -> "Cam $id"
             }
-
-            // Campos novos de CameraCapabilities
             val pixelArraySize   = ch.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)
             val sensorPixelArr   = pixelArraySize?.let { listOf(it.width, it.height) }
             val physicalSize     = ch.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
