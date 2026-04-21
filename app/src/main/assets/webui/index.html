@@ -13,7 +13,6 @@
     <p>Camera2 API · RootEncoder · NanoHTTPD · v5-CAMUI</p>
   </div>
 
-  <!-- Status bar -->
   <div class="statusbar">
     <div class="badge"><span class="dot off" id="dot-stream"></span><span id="lbl-stream">Conectando...</span></div>
     <div class="badge">Cam: <span id="lbl-cam">-</span></div>
@@ -22,9 +21,11 @@
     <div class="badge">Lat: <span id="lbl-lat" class="lat-ok">-</span></div>
     <div class="badge" id="badge-manual" style="display:none">🎬 Manual</div>
     <div class="badge" id="badge-rggb" style="display:none">🌈 RGGB</div>
+    <div class="badge" id="badge-yuv" style="display:none">🟦 YUV</div>
+    <div class="badge" id="badge-raw" style="display:none">📷 RAW</div>
+    <div class="badge" id="badge-depth" style="display:none">🧭 DEPTH</div>
   </div>
 
-  <!-- RTMP -->
   <div class="card"><h3>📡 RTMP Stream</h3>
     <div class="info-row"><div class="info-pill">URL: <span id="info-rtmpurl" style="word-break:break-all">-</span></div></div>
     <div class="rtmp-row">
@@ -38,7 +39,6 @@
     </div>
   </div>
 
-  <!-- Estado da Camera -->
   <div class="card"><h3>Estado da Camera</h3><div class="info-row">
     <div class="info-pill">Foco: <span id="info-focusmode">-</span></div>
     <div class="info-pill">Dist: <span id="info-focusdist">-</span></div>
@@ -56,7 +56,6 @@
     <div class="info-pill">HotPx: <span id="info-hotpx">-</span></div>
   </div></div>
 
-  <!-- Monitor Ao Vivo -->
   <div class="card" id="card-monitor">
     <h3>📊 Monitor Ao Vivo <span style="font-size:10px;color:var(--muted);font-weight:400">(TotalCaptureResult)</span></h3>
     <div class="monitor-grid">
@@ -71,12 +70,49 @@
     </div>
   </div>
 
-  <!-- Camera selector -->
+  <div class="card" id="card-advanced-vision">
+    <h3>🧠 Visão Avançada</h3>
+    <div class="advanced-grid">
+      <div class="advanced-toggle">
+        <div>
+          <div class="toggle-title">Pipeline YUV</div>
+          <div class="toggle-sub">Frame processor e telemetria de timestamp</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="toggle-yuv" onchange="toggleYuv(this)"><span class="sw"></span></label>
+      </div>
+      <div class="advanced-toggle">
+        <div>
+          <div class="toggle-title">Captura RAW</div>
+          <div class="toggle-sub">Ativa o gerenciador RAW da câmera atual</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="toggle-raw" onchange="toggleRaw(this)"><span class="sw"></span></label>
+      </div>
+      <div class="advanced-toggle">
+        <div>
+          <div class="toggle-title">Depth Fusion</div>
+          <div class="toggle-sub">Processa profundidade e expõe métricas em mm</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="toggle-depth" onchange="toggleDepth(this)"><span class="sw"></span></label>
+      </div>
+    </div>
+    <div class="advanced-stats">
+      <div class="monitor-cell"><div class="mc-label">YUV Status</div><div class="mc-val" id="adv-yuv-status">-</div></div>
+      <div class="monitor-cell"><div class="mc-label">RAW Status</div><div class="mc-val" id="adv-raw-status">-</div></div>
+      <div class="monitor-cell"><div class="mc-label">Depth Status</div><div class="mc-val" id="adv-depth-status">-</div></div>
+      <div class="monitor-cell"><div class="mc-label">Último YUV TS</div><div class="mc-val" id="adv-yuv-ts">-</div></div>
+      <div class="monitor-cell"><div class="mc-label">Depth Mean</div><div class="mc-val" id="adv-depth-mean">-</div></div>
+      <div class="monitor-cell"><div class="mc-label">Depth Min / Max</div><div class="mc-val" id="adv-depth-range">-</div></div>
+    </div>
+    <div class="depth-meter-wrap">
+      <div class="depth-meter-label">Nível médio de profundidade</div>
+      <div class="depth-meter"><div class="depth-meter-bar" id="depth-meter-bar"></div></div>
+    </div>
+  </div>
+
   <div class="card" id="card-camera"><h3>📷 Camera</h3>
     <div class="btngroup" id="btngroup-camera">Carregando cameras...</div>
   </div>
 
-  <!-- Resolucao + Bitrate -->
   <div class="grid2">
     <div class="card"><h3>Resolucao</h3>
       <div class="btngroup" id="btngroup-resolution" style="margin-bottom:10px"></div>
@@ -96,7 +132,6 @@
     </div>
   </div>
 
-  <!-- Zoom Digital -->
   <div class="card" id="card-zoom"><h3>🔍 Zoom Digital <span class="val" id="zoom-val">1x</span></h3>
     <div class="slider-wrap">
       <input type="range" id="zoom" min="0" max="1" value="0" step="0.01" oninput="updateZoom(this.value)">
@@ -110,14 +145,12 @@
     </div>
   </div>
 
-  <!-- Zoom Optico -->
   <div class="card hidden" id="card-optical-zoom">
     <h3>🔭 Zoom Óptico <span class="val orange" id="optical-zoom-val">Auto</span></h3>
     <p style="font-size:11px;color:var(--muted);margin-bottom:10px">Troca a lente física (focal length). Sem perda de qualidade.</p>
     <div class="btngroup" id="btngroup-optical-zoom"></div>
   </div>
 
-  <!-- Foco -->
   <div class="card" id="card-focus"><h3>🎯 Foco <span class="val" id="focus-val">Auto</span></h3>
     <div class="slider-wrap">
       <input type="range" id="focus" min="0" max="10" value="0" step="0.1" oninput="updateFocus(this.value)">
@@ -127,7 +160,6 @@
     <button style="width:100%;margin-top:8px" onclick="triggerAF(this)">🎯 Tocar para Focar</button>
   </div>
 
-  <!-- ISO + EV -->
   <div class="grid2">
     <div class="card" id="card-iso"><h3>ISO <span class="val" id="iso-val">50</span></h3>
       <div class="slider-wrap">
@@ -157,7 +189,6 @@
     </div>
   </div>
 
-  <!-- Shutter Speed -->
   <div class="card hidden" id="card-shutter"><h3>⏱ Shutter <span class="val manual" id="shutter-val">1/50s</span></h3>
     <div class="slider-wrap">
       <input type="range" id="shutter" class="manual-slider" min="0" max="10" value="2" step="1" oninput="updateShutter(this.value)">
@@ -175,7 +206,6 @@
     </div>
   </div>
 
-  <!-- Frame Time -->
   <div class="card hidden" id="card-frame"><h3>🎬 Frame Time <span class="val manual" id="frame-val">1/30s</span></h3>
     <div class="slider-wrap">
       <input type="range" id="frame" class="manual-slider" min="0" max="3" value="1" step="1" oninput="updateFrameTime(this.value)">
@@ -190,7 +220,6 @@
     <p style="font-size:10px;color:var(--muted);margin-top:8px">Frame Duration define o FPS maximo do sensor.</p>
   </div>
 
-  <!-- White Balance -->
   <div class="card" id="card-wb"><h3>Balanço de Branco</h3>
     <div class="btngroup" id="btngroup-wb"></div>
     <div class="toggle-row" style="margin-top:8px">
@@ -199,7 +228,6 @@
     </div>
   </div>
 
-  <!-- RGGB -->
   <div class="card" id="card-rggb">
     <h3>🌈 WB Manual RGGB <span class="val orange" id="rggb-status">Off</span></h3>
     <p style="font-size:11px;color:var(--muted);margin-bottom:12px">Ganho por canal RGGB. Sobrescreve o AWB automático quando ativo.</p>
@@ -233,7 +261,6 @@
     <button style="width:100%;margin-top:8px" class="btn-stop" onclick="resetRggb(this)">↺ Resetar RGGB (volta AWB Auto)</button>
   </div>
 
-  <!-- Extras -->
   <div class="card" id="card-extras"><h3>Controles Extras</h3>
     <div id="extras-flash"></div>
     <div class="toggle-row" id="row-ois">
@@ -246,7 +273,6 @@
     </div>
   </div>
 
-  <!-- Processamento de Imagem -->
   <div class="card hidden postproc-active" id="card-postproc">
     <h3>🎞 Processamento de Imagem</h3>
     <div class="postproc-presets">

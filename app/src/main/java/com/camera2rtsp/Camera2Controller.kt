@@ -428,10 +428,47 @@ class Camera2Controller {
     fun updateSettings(params: Map<String, Any>) {
         val cam = rtmpCamera ?: run { Log.w(tag, "rtmpCamera nulo"); return }
 
-        params["yuvCapture"]?.let  { if (it as Boolean) enableYuvProcessor()  else disableYuvProcessor()  }
-        params["rawCapture"]?.let  { if (it as Boolean) enableRawCapture(currentWidth, currentHeight) else disableRawCapture() }
-        params["depthFusion"]?.let { if (it as Boolean) enableDepthFusion(currentWidth, currentHeight) else disableDepthFusion() }
+        params["yuvCapture"]?.let { value ->
+            val enabled = when (value) {
+                is Boolean -> value
+                is Number -> value.toInt() != 0
+                else -> value.toString().equals("true", ignoreCase = true)
+            }
+            if (enabled) {
+                enableYuvProcessor(currentWidth, currentHeight)
+            } else {
+                disableYuvProcessor()
+            }
+            Log.d(tag, "yuvCapture -> $enabled")
+        }
 
+        params["rawCapture"]?.let { value ->
+            val enabled = when (value) {
+                is Boolean -> value
+                is Number -> value.toInt() != 0
+                else -> value.toString().equals("true", ignoreCase = true)
+            }
+            if (enabled) {
+                enableRawCapture(currentWidth, currentHeight)
+            } else {
+                disableRawCapture()
+            }
+            Log.d(tag, "rawCapture -> $enabled")
+        }
+
+        params["depthFusion"]?.let { value ->
+            val enabled = when (value) {
+                is Boolean -> value
+                is Number -> value.toInt() != 0
+                else -> value.toString().equals("true", ignoreCase = true)
+            }
+            if (enabled) {
+                enableDepthFusion(currentWidth, currentHeight)
+            } else {
+                disableDepthFusion()
+            }
+            Log.d(tag, "depthFusion -> $enabled")
+        }
         params["manualSensor"]?.let {
             manualSensor = it as Boolean
             if (manualSensor) applyManualSensor()
