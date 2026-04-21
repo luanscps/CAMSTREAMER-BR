@@ -1,0 +1,16 @@
+package com.camera2rtsp
+
+/*
+ * WebControlHtml
+ *
+ * Nenhuma alteracao estrutural e necessaria aqui porque este arquivo apenas serve
+ * assets de app/src/main/assets/webui/.
+ *
+ * O proximo patch de interface deve alterar os arquivos estaticos:
+ * - app/src/main/assets/webui/index.html
+ * - app/src/main/assets/webui/app.js
+ * - opcionalmente style.css
+ *
+ * Esta etapa entrega a integracao backend para a WebGUI via /api/status e /api/control.
+ */
+object WebControlHtml

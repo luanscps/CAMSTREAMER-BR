@@ -428,6 +428,10 @@ class Camera2Controller {
     fun updateSettings(params: Map<String, Any>) {
         val cam = rtmpCamera ?: run { Log.w(tag, "rtmpCamera nulo"); return }
 
+        params["yuvCapture"]?.let  { if (it as Boolean) enableYuvProcessor()  else disableYuvProcessor()  }
+        params["rawCapture"]?.let  { if (it as Boolean) enableRawCapture(currentWidth, currentHeight) else disableRawCapture() }
+        params["depthFusion"]?.let { if (it as Boolean) enableDepthFusion(currentWidth, currentHeight) else disableDepthFusion() }
+
         params["manualSensor"]?.let {
             manualSensor = it as Boolean
             if (manualSensor) applyManualSensor()
