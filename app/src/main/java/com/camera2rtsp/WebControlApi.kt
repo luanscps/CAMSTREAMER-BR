@@ -24,7 +24,12 @@ object WebControlApi {
         val currentCamId = cameraController.currentCameraId
         val cached = capsCache
         if (cached != null && capsCacheForCamId == currentCamId) return cached
-        val fresh = cameraController.discoverAllCameras(context)
+
+        val mgr = context.getSystemService(Context.CAMERA_SERVICE)
+                as android.hardware.camera2.CameraManager
+        val fresh = mgr.cameraIdList
+            .mapNotNull { id -> CameraCapabilitiesReader.read(context, id) }
+
         capsCache = fresh
         capsCacheForCamId = currentCamId
         return fresh

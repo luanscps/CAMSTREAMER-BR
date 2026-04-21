@@ -188,8 +188,8 @@ object CameraCapabilitiesReader {
             val awbLockAvailable = chars.get(CameraCharacteristics.CONTROL_AWB_LOCK_AVAILABLE) == true
 
             val physicalCameraIds = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                chars.physicalCameraIds?.toList()
-            } else emptyList()
+                chars.physicalCameraIds?.toList() ?: emptyList()
+            } else emptyList<String>()
 
             val timestampSource = when (chars.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE)) {
                 CameraMetadata.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME -> "REALTIME"
