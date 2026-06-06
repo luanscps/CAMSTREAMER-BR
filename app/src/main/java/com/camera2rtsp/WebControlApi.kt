@@ -220,7 +220,8 @@ object WebControlApi {
 
         if (isPoll) {
             val ready = dngBytes != null && dngBytes.isNotEmpty()
-            val sizeKb = if (ready) dngBytes!!.size / 1024 else 0
+            // Após o if acima, o smart cast garante dngBytes: ByteArray (nao-nulo) dentro do bloco
+            val sizeKb = if (ready) dngBytes.size / 1024 else 0
             return okJson("""{"ready":$ready,"filename":"$filename","size_kb":$sizeKb}""")
         }
 
