@@ -22,6 +22,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 
 class Camera2Controller {
 
@@ -68,6 +69,11 @@ class Camera2Controller {
     var rawCaptureEnabled = false
     var rawManager: RawCaptureManager? = null
     var rawFrameCallback: ((RawCaptureManager.RawFrame) -> Unit)? = null
+
+    // Flag atomico: true somente entre captureRawStill() e o consumo do
+    // TotalCaptureResult pelo RawCaptureManager. Garante que offerResult()
+    // nao polua a fila com resultados de preview (30x/s).
+    private val rawCapturePending = AtomicBoolean(false)
 
     // Ultimo DNG capturado disponivel para download HTTP
     @Volatile var lastRawDngBytes: ByteArray? = null
@@ -151,8 +157,12 @@ class Camera2Controller {
                     CaptureResult.CONTROL_AE_STATE_FLASH_REQUIRED -> "flash_required"
                     else                                           -> "idle"
                 }
-                // Alimenta a fila do RawCaptureManager se estiver ativo
-                rawManager?.offerResult(result)
+                // Enfileira APENAS se um still RAW esta pendente.
+                // Fix: evita poluir a fila com resultados de preview (30x/s)
+                // que causavam DNG com metadados errados (ISO/exposure do preview).
+                if (rawCapturePending.get()) {
+                    rawManager?.offerResult(result)
+                }
             }
             Log.i(tag, "[liveMonitor] callback registrado com sucesso")
         }.onFailure { Log.w(tag, "[liveMonitor] falhou: ${it.message}") }
@@ -229,9 +239,10 @@ class Camera2Controller {
         }
         releaseRawManager()
         rawFrameCallback = callback
-        rawManager = RawCaptureManager(width, height, characteristics) { frame ->
-            rawFrameCallback?.invoke(frame)
-        }.also { it.init() }
+        rawManager = RawCaptureManager(width, height, characteristics,
+            onRawFrame = { frame -> rawFrameCallback?.invoke(frame) },
+            onResultConsumed = { rawCapturePending.set(false) }
+        ).also { it.init() }
         rawCaptureEnabled = true
         Log.i(tag, "enableRawCapture ok ${width}x${height}")
         return true
@@ -241,14 +252,17 @@ class Camera2Controller {
         releaseRawManager()
         rawFrameCallback = null
         rawCaptureEnabled = false
+        rawCapturePending.set(false)
         Log.i(tag, "disableRawCapture ok")
     }
 
     /**
      * Dispara uma captura RAW still:
-     * 1. Inicializa RawCaptureManager com as CameraCharacteristics corretas
-     * 2. No callback do frame: salva no MediaStore E popula lastRawDngBytes
-     * 3. WebControlApi consome lastRawDngBytes e serve como download HTTP
+     * 1. Seta rawCapturePending=true para que o liveMonitor enfileire
+     *    apenas o proximo TotalCaptureResult (do still, nao do preview)
+     * 2. Inicializa RawCaptureManager com as CameraCharacteristics corretas
+     * 3. No callback do frame: salva no MediaStore E popula lastRawDngBytes
+     * 4. onResultConsumed reseta rawCapturePending=false apos o poll()
      */
     fun captureRawStill(context: Context) {
         val ctx = appContext ?: context
@@ -264,7 +278,6 @@ class Camera2Controller {
             Log.e(tag, "captureRawStill: CameraCharacteristics falhou", it)
             return
         }
-        // Tamanho maximo RAW do sensor
         val rawSize = characteristics
             .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
             ?.getOutputSizes(android.graphics.ImageFormat.RAW_SENSOR)
@@ -272,27 +285,33 @@ class Camera2Controller {
         val rw = rawSize?.width  ?: currentWidth
         val rh = rawSize?.height ?: currentHeight
 
-        // Reinicializa somente se necessario (tamanho ou cam mudou)
         if (rawManager == null || !rawCaptureEnabled) {
             releaseRawManager()
-            rawManager = RawCaptureManager(rw, rh, characteristics) { frame ->
-                if (frame.dngBytes.isNotEmpty()) {
-                    val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-                    val filename = "RAW_${ts}_CAM${currentCameraId}.dng"
-                    // Destino 1: MediaStore / DCIM
-                    saveToMediaStore(ctx, frame.dngBytes, filename)
-                    // Destino 2: memoria compartilhada para download HTTP
-                    lastRawDngBytes = frame.dngBytes
-                    lastRawFilename = filename
-                    Log.i(tag, "captureRawStill salvo: $filename (${frame.dngBytes.size / 1024}KB)")
-                } else {
-                    Log.e(tag, "captureRawStill: DNG vazio (DngCreator falhou)")
+            rawManager = RawCaptureManager(rw, rh, characteristics,
+                onRawFrame = { frame ->
+                    if (frame.dngBytes.isNotEmpty()) {
+                        val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                        val filename = "RAW_${ts}_CAM${currentCameraId}.dng"
+                        saveToMediaStore(ctx, frame.dngBytes, filename)
+                        lastRawDngBytes = frame.dngBytes
+                        lastRawFilename = filename
+                        Log.i(tag, "captureRawStill salvo: $filename (${frame.dngBytes.size / 1024}KB)")
+                    } else {
+                        Log.e(tag, "captureRawStill: DNG vazio (DngCreator falhou)")
+                    }
+                },
+                onResultConsumed = {
+                    rawCapturePending.set(false)
+                    Log.d(tag, "captureRawStill: rawCapturePending resetado para false")
                 }
-            }.also { it.init() }
+            ).also { it.init() }
             rawCaptureEnabled = true
         }
 
-        // Dispara o still capture na worker thread
+        // Habilita o gate ANTES do disparo para nao perder o resultado
+        rawCapturePending.set(true)
+        Log.d(tag, "captureRawStill: rawCapturePending=true, disparando still")
+
         post {
             runCatching {
                 setCustomRequest { b ->
@@ -300,14 +319,17 @@ class Camera2Controller {
                           CameraMetadata.CONTROL_CAPTURE_INTENT_STILL_CAPTURE)
                 }
                 Log.d(tag, "captureRawStill disparo enviado")
-            }.onFailure { Log.e(tag, "captureRawStill disparo falhou", it) }
+            }.onFailure {
+                // Se o disparo falhou, reseta o flag para nao bloquear o liveMonitor
+                rawCapturePending.set(false)
+                Log.e(tag, "captureRawStill disparo falhou — rawCapturePending resetado", it)
+            }
         }
     }
 
     private fun saveToMediaStore(context: Context, bytes: ByteArray, filename: String) {
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // Android 10+ — sem WRITE_EXTERNAL_STORAGE
                 val values = ContentValues().apply {
                     put(MediaStore.Images.Media.DISPLAY_NAME, filename)
                     put(MediaStore.Images.Media.MIME_TYPE, "image/x-adobe-dng")
@@ -323,7 +345,6 @@ class Camera2Controller {
                 context.contentResolver.update(uri, values, null, null)
                 Log.i(tag, "saveToMediaStore (Q+): $uri")
             } else {
-                // Android 9 e abaixo — precisa de WRITE_EXTERNAL_STORAGE no manifest
                 val dir = File(
                     Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
                     "CAMSTREAMER"
@@ -373,6 +394,7 @@ class Camera2Controller {
     }
 
     private fun releaseRawManager() {
+        rawCapturePending.set(false)
         runCatching { rawManager?.release() }
             .onFailure { Log.e(tag, "releaseRawManager falhou", it) }
         rawManager = null
