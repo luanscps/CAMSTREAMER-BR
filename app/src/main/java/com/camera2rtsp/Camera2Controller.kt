@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
@@ -101,11 +102,51 @@ class Camera2Controller {
     private fun post(block: () -> Unit) =
         worker.post { runCatching(block).onFailure { Log.e(tag, "worker error", it) } }
 
+    // -------------------------------------------------------------------------
+    // Reflexão: campos do Camera2Base / Camera2ApiManager
+    // -------------------------------------------------------------------------
+
     private val reflField_cameraManager: java.lang.reflect.Field? by lazy {
         runCatching {
             Camera2Base::class.java.getDeclaredField("cameraManager")
                 .also { it.isAccessible = true }
         }.onFailure { Log.w(tag, "[reflection] campo 'cameraManager' nao encontrado: ${it.message}") }
+            .getOrNull()
+    }
+
+    /** cameraCaptureSession: CameraCaptureSession? em Camera2ApiManager */
+    private val reflField_captureSession: java.lang.reflect.Field? by lazy {
+        runCatching {
+            Camera2ApiManager::class.java.getDeclaredField("cameraCaptureSession")
+                .also { it.isAccessible = true }
+        }.onFailure { Log.w(tag, "[reflection] campo 'cameraCaptureSession' nao encontrado: ${it.message}") }
+            .getOrNull()
+    }
+
+    /** builderInputSurface: CaptureRequest.Builder? em Camera2ApiManager */
+    private val reflField_builder: java.lang.reflect.Field? by lazy {
+        runCatching {
+            Camera2ApiManager::class.java.getDeclaredField("builderInputSurface")
+                .also { it.isAccessible = true }
+        }.onFailure { Log.w(tag, "[reflection] campo 'builderInputSurface' nao encontrado: ${it.message}") }
+            .getOrNull()
+    }
+
+    /** cameraHandler: Handler? em Camera2ApiManager */
+    private val reflField_cameraHandler: java.lang.reflect.Field? by lazy {
+        runCatching {
+            Camera2ApiManager::class.java.getDeclaredField("cameraHandler")
+                .also { it.isAccessible = true }
+        }.onFailure { Log.w(tag, "[reflection] campo 'cameraHandler' nao encontrado: ${it.message}") }
+            .getOrNull()
+    }
+
+    /** cameraDevice: CameraDevice? em Camera2ApiManager */
+    private val reflField_cameraDevice: java.lang.reflect.Field? by lazy {
+        runCatching {
+            Camera2ApiManager::class.java.getDeclaredField("cameraDevice")
+                .also { it.isAccessible = true }
+        }.onFailure { Log.w(tag, "[reflection] campo 'cameraDevice' nao encontrado: ${it.message}") }
             .getOrNull()
     }
 
@@ -115,6 +156,24 @@ class Camera2Controller {
             field.get(rtmpCamera) as? Camera2ApiManager
         }.onFailure { Log.e(tag, "getCam2Manager falhou", it) }.getOrNull()
     }
+
+    private fun getCaptureSession(cam2: Camera2ApiManager): CameraCaptureSession? =
+        runCatching { reflField_captureSession?.get(cam2) as? CameraCaptureSession }
+            .onFailure { Log.e(tag, "getCaptureSession falhou", it) }.getOrNull()
+
+    private fun getBuilderInputSurface(cam2: Camera2ApiManager): CaptureRequest.Builder? =
+        runCatching { reflField_builder?.get(cam2) as? CaptureRequest.Builder }
+            .onFailure { Log.e(tag, "getBuilderInputSurface falhou", it) }.getOrNull()
+
+    private fun getCameraHandler(cam2: Camera2ApiManager): Handler? =
+        runCatching { reflField_cameraHandler?.get(cam2) as? Handler }
+            .onFailure { Log.e(tag, "getCameraHandler falhou", it) }.getOrNull()
+
+    private fun getCameraDevice(cam2: Camera2ApiManager): CameraDevice? =
+        runCatching { reflField_cameraDevice?.get(cam2) as? CameraDevice }
+            .onFailure { Log.e(tag, "getCameraDevice falhou", it) }.getOrNull()
+
+    // -------------------------------------------------------------------------
 
     private fun setCustomRequest(block: (CaptureRequest.Builder) -> Unit): Boolean {
         val cam2 = getCam2Manager() ?: run {
@@ -157,9 +216,9 @@ class Camera2Controller {
                     CaptureResult.CONTROL_AE_STATE_FLASH_REQUIRED -> "flash_required"
                     else                                           -> "idle"
                 }
-                // Enfileira APENAS se um still RAW esta pendente.
-                // Fix: evita poluir a fila com resultados de preview (30x/s)
-                // que causavam DNG com metadados errados (ISO/exposure do preview).
+                // liveMonitor so offerResult durante captura RAW ativa.
+                // O disparo one-shot (captureRawStill) tem seu proprio callback,
+                // mas mantemos aqui como fallback caso a reflexao da sessao falhe.
                 if (rawCapturePending.get()) {
                     rawManager?.offerResult(result)
                 }
@@ -257,12 +316,22 @@ class Camera2Controller {
     }
 
     /**
-     * Dispara uma captura RAW still:
-     * 1. Seta rawCapturePending=true para que o liveMonitor enfileire
-     *    apenas o proximo TotalCaptureResult (do still, nao do preview)
-     * 2. Inicializa RawCaptureManager com as CameraCharacteristics corretas
-     * 3. No callback do frame: salva no MediaStore E popula lastRawDngBytes
-     * 4. onResultConsumed reseta rawCapturePending=false apos o poll()
+     * Dispara uma captura RAW still via session.capture() one-shot (reflexao).
+     *
+     * Correcao do bug de background: o metodo anterior usava setCustomRequest
+     * (CONTROL_CAPTURE_INTENT_STILL_CAPTURE) que apenas modifica o repeating
+     * request da preview. Quando a MainActivity ia para background, o SurfaceView
+     * era destruido, a preview parava e o TotalCaptureResult nunca chegava,
+     * travando rawCapturePending=true para sempre.
+     *
+     * Solucao: acessamos cameraCaptureSession, cameraDevice e cameraHandler do
+     * Camera2ApiManager via reflexao e usamos session.capture() one-shot com
+     * TEMPLATE_STILL_CAPTURE + surface do RawCaptureManager como target adicional.
+     * O TotalCaptureResult e entregue diretamente no onCaptureCompleted do callback,
+     * sem depender do liveMonitor nem do SurfaceView estar ativo.
+     *
+     * Fallback: se a reflexao falhar (campo renomeado em versao futura da lib),
+     * cai no comportamento legado via setCustomRequest.
      */
     fun captureRawStill(context: Context) {
         val ctx = appContext ?: context
@@ -313,16 +382,85 @@ class Camera2Controller {
         Log.d(tag, "captureRawStill: rawCapturePending=true, disparando still")
 
         post {
-            runCatching {
-                setCustomRequest { b ->
-                    b.set(CaptureRequest.CONTROL_CAPTURE_INTENT,
-                          CameraMetadata.CONTROL_CAPTURE_INTENT_STILL_CAPTURE)
+            val cam2 = getCam2Manager()
+            val session = cam2?.let { getCaptureSession(it) }
+            val device  = cam2?.let { getCameraDevice(it) }
+            val handler = cam2?.let { getCameraHandler(it) }
+            val rawSurface = rawManager?.getSurface()
+
+            // --- Caminho principal: one-shot via session.capture() ---
+            if (session != null && device != null && rawSurface != null) {
+                runCatching {
+                    val stillBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
+
+                    // Propaga todos os parametros do repeating request (ISO, WB, zoom, etc.)
+                    cam2.let { getBuilderInputSurface(it) }?.build()?.let { previewReq ->
+                        // Copia as keys relevantes do preview para o still
+                        for (key in previewReq.keys) {
+                            @Suppress("UNCHECKED_CAST")
+                            val k = key as CaptureRequest.Key<Any>
+                            previewReq.get(k)?.let { v -> runCatching { stillBuilder.set(k, v) } }
+                        }
+                    }
+
+                    stillBuilder.set(CaptureRequest.CONTROL_CAPTURE_INTENT,
+                        CameraMetadata.CONTROL_CAPTURE_INTENT_STILL_CAPTURE)
+
+                    // Adiciona a surface RAW como target do still
+                    stillBuilder.addTarget(rawSurface)
+
+                    val captureCallback = object : CameraCaptureSession.CaptureCallback() {
+                        override fun onCaptureCompleted(
+                            session: CameraCaptureSession,
+                            request: CaptureRequest,
+                            result: TotalCaptureResult
+                        ) {
+                            Log.d(tag, "captureRawStill one-shot onCaptureCompleted")
+                            rawManager?.offerResult(result)
+                        }
+
+                        override fun onCaptureFailed(
+                            session: CameraCaptureSession,
+                            request: CaptureRequest,
+                            failure: android.hardware.camera2.CaptureFailure
+                        ) {
+                            rawCapturePending.set(false)
+                            Log.e(tag, "captureRawStill one-shot onCaptureFailed reason=${failure.reason}")
+                        }
+                    }
+
+                    session.capture(stillBuilder.build(), captureCallback, handler)
+                    Log.d(tag, "captureRawStill disparo one-shot enviado via session.capture()")
+
+                }.onFailure { e ->
+                    rawCapturePending.set(false)
+                    Log.e(tag, "captureRawStill one-shot falhou — fallback para setCustomRequest", e)
+                    // --- Fallback: repeating request (comportamento anterior) ---
+                    runCatching {
+                        setCustomRequest { b ->
+                            b.set(CaptureRequest.CONTROL_CAPTURE_INTENT,
+                                CameraMetadata.CONTROL_CAPTURE_INTENT_STILL_CAPTURE)
+                        }
+                        rawCapturePending.set(true) // religa o gate para o liveMonitor
+                        Log.d(tag, "captureRawStill fallback disparo enviado")
+                    }.onFailure {
+                        rawCapturePending.set(false)
+                        Log.e(tag, "captureRawStill fallback tambem falhou", it)
+                    }
                 }
-                Log.d(tag, "captureRawStill disparo enviado")
-            }.onFailure {
-                // Se o disparo falhou, reseta o flag para nao bloquear o liveMonitor
-                rawCapturePending.set(false)
-                Log.e(tag, "captureRawStill disparo falhou — rawCapturePending resetado", it)
+            } else {
+                // --- Fallback: session/device nulos (reflexao falhou) ---
+                Log.w(tag, "captureRawStill: session=$session device=$device rawSurface=$rawSurface — usando fallback setCustomRequest")
+                runCatching {
+                    setCustomRequest { b ->
+                        b.set(CaptureRequest.CONTROL_CAPTURE_INTENT,
+                            CameraMetadata.CONTROL_CAPTURE_INTENT_STILL_CAPTURE)
+                    }
+                    Log.d(tag, "captureRawStill fallback disparo enviado")
+                }.onFailure {
+                    rawCapturePending.set(false)
+                    Log.e(tag, "captureRawStill disparo falhou — rawCapturePending resetado", it)
+                }
             }
         }
     }
@@ -953,8 +1091,8 @@ class Camera2Controller {
                     CameraCharacteristics.CONTROL_AE_MODE_OFF                  -> "off"
                     CameraCharacteristics.CONTROL_AE_MODE_ON                   -> "on"
                     CameraCharacteristics.CONTROL_AE_MODE_ON_AUTO_FLASH        -> "on-auto-flash"
-                    CameraCharacteristics.CONTROL_AE_MODE_ON_ALWAYS_FLASH      -> "on-always-flash"
                     CameraCharacteristics.CONTROL_AE_MODE_ON_AUTO_FLASH_REDEYE -> "on-auto-flash-redeye"
+                    CameraCharacteristics.CONTROL_AE_MODE_ON_ALWAYS_FLASH      -> "on-always-flash"
                     else -> "unknown"
                 }
             } ?: emptyList()
