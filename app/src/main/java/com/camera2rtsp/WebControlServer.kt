@@ -17,43 +17,34 @@ class WebControlServer(
 
         // Rotas publicas - sem verificacao de cookie
 
-        // Assets CSS/JS sempre publicos (necessarios para renderizar login.html)
         if (uri == "/style.css") return serveAsset("style.css", "text/css")
         if (uri == "/app.js")    return serveAsset("app.js",    "application/javascript")
 
-        // Login: GET serve HTML direto, POST processa credenciais
         if (uri == "/auth/login") {
             return when (method) {
                 Method.GET -> {
                     val token = extractSessionCookie(session)
                     if (SessionManager.isValidWebSession(token)) redirectTo("/")
-                    else serveAsset("login.html", "text/html") // NUNCA redirect aqui
+                    else serveAsset("login.html", "text/html")
                 }
                 Method.POST -> WebControlAuth.handleLogin(session)
                 else        -> notFound()
             }
         }
 
-        // Logout: limpa cookie e redireciona para login UMA VEZ
         if (uri == "/auth/logout") return WebControlAuth.handleLogout()
-
-        // Middleware: verifica cookie para rotas protegidas
 
         val token = extractSessionCookie(session)
         val authenticated = SessionManager.isValidWebSession(token)
 
-        // Raiz sem autenticacao: serve login.html DIRETO (fix issue #5)
-        // Evita o loop: / -> redirect /auth/login -> / -> loop infinito
         if (uri == "/" && !authenticated) {
             return serveAsset("login.html", "text/html")
         }
 
-        // APIs e rotas JSON sem auth: retorna 401 JSON (sem redirect)
         if (!authenticated) {
             return if (uri.startsWith("/api/") || uri == "/status") {
                 unauthorizedJson()
             } else {
-                // Qualquer outra rota desconhecida sem auth: serve login.html
                 serveAsset("login.html", "text/html")
             }
         }
@@ -67,11 +58,13 @@ class WebControlServer(
             uri == "/api/plan"         -> WebControlAuth.servePlan()
             uri == "/api/control" && method == Method.POST
                                        -> WebControlApi.handleControl(session, cameraController)
+            // Rotas RAW
+            uri == "/api/raw/capture" && method == Method.POST
+                                       -> WebControlApi.handleRawCapture(cameraController, context)
+            uri == "/api/raw/result"   -> WebControlApi.serveRawResult(session, cameraController)
             else -> notFound()
         }
     }
-
-    // Helpers
 
     private fun extractSessionCookie(session: IHTTPSession): String {
         val header = session.headers["cookie"] ?: return ""
