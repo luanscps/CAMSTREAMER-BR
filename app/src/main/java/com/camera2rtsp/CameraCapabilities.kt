@@ -52,8 +52,10 @@ data class CameraCapabilities(
         ?.takeIf { it.size >= 2 }
         ?.let { "${it[0]}x${it[1]}" }
 
+    // Bug #1 fix: supportsManualSensor removido — RAW_SENSOR nao exige
+    // MANUAL_SENSOR capability. Devices LIMITED podem ter RAW sem manual sensor.
     fun isRawCaptureFeasible(): Boolean =
-        supportsRaw && supportsManualSensor && bestRawResolution() != null
+        supportsRaw && bestRawResolution() != null
 
     fun hasUsableDepthSensor(): Boolean = supportsDepthOutput && isDepth
 
