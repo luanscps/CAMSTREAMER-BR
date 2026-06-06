@@ -8,6 +8,9 @@ var RES_MIN_WIDTH=640;
 var _caps=null,_currentCamId='0',_isManual=false,_rggbEnabled=false,_toastTimer,_pollFail=0,_pollCtrl=null;
 var _brT,_zT,_fT,_iT,_eT,_shT,_frT,_rgT_R,_rgT_Gr,_rgT_Gb,_rgT_B;
 
+// Estado da captura RAW
+var _rawPollTimer=null,_rawPollCount=0,_rawPollMax=60; // 60 * 500ms = 30s timeout
+
 function showToast(msg,isErr){var t=document.getElementById('toast');t.textContent=msg;t.className=isErr?'err':'ok';t.classList.add('show');clearTimeout(_toastTimer);_toastTimer=setTimeout(function(){t.classList.remove('show');},1800)}
 function feedback(btn,ok){if(!btn)return;var cls=ok?'fb-ok':'fb-err';btn.classList.remove('fb-ok','fb-err');void btn.offsetWidth;btn.classList.add(cls);setTimeout(function(){btn.classList.remove(cls);},500)}
 function markActive(attr,val){var els=document.querySelectorAll('['+attr+']');for(var i=0;i<els.length;i++){els[i].classList.toggle('active',els[i].getAttribute(attr)===String(val))}}
@@ -75,6 +78,112 @@ function toggleYuv(el){sendControl({yuvCapture:el.checked},null,el.checked?'YUV 
 function toggleRaw(el){sendControl({rawCapture:el.checked},null,el.checked?'RAW ON':'RAW OFF')}
 function toggleDepth(el){sendControl({depthFusion:el.checked},null,el.checked?'Depth ON':'Depth OFF')}
 
+// ─────────────────────────────────────────────────────
+// RAW STILL CAPTURE
+// Bug #7 fix: usa fetch() + Blob URL em vez de <a download>
+// para garantir download cross-origin no Chrome/Edge/Firefox.
+// ─────────────────────────────────────────────────────
+
+function _setRawStatus(msg){var el=document.getElementById('raw-capture-status');if(el)el.textContent=msg||'-';}
+function _setRawDownloadRow(show,filename,sizeKb){
+  var row=document.getElementById('raw-download-row');
+  if(!row)return;
+  row.style.display=show?'block':'none';
+  if(show){
+    var nm=document.getElementById('raw-file-name');if(nm)nm.textContent=filename||'';
+    var sz=document.getElementById('raw-file-size');if(sz)sz.textContent=sizeKb||'?';
+  }
+}
+
+function captureRaw(btn){
+  if(btn)btn.disabled=true;
+  _setRawStatus('⏳ Enviando disparo...');
+  _setRawDownloadRow(false);
+  clearTimeout(_rawPollTimer);
+  _rawPollCount=0;
+
+  fetch('/api/raw/capture',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
+    .then(function(r){
+      // 202 = aceito e processando; qualquer outro codigo e erro
+      if(r.status!==202&&!r.ok)throw new Error('HTTP '+r.status);
+      _setRawStatus('⏳ Capturando RAW... aguarde');
+      showToast('Captura RAW iniciada',false);
+      _pollRawReady();
+    })
+    .catch(function(e){
+      _setRawStatus('❌ Erro: '+e.message);
+      showToast('Falha ao capturar RAW',true);
+      if(btn)btn.disabled=false;
+    });
+}
+
+function _pollRawReady(){
+  _rawPollCount++;
+  if(_rawPollCount>_rawPollMax){
+    _setRawStatus('⏱ Timeout: captura nao concluida em 30s');
+    var btn=document.getElementById('btn-capture-raw');
+    if(btn)btn.disabled=false;
+    return;
+  }
+
+  fetch('/api/raw/result?poll=1')
+    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
+    .then(function(data){
+      if(data.ready){
+        _setRawStatus('✅ Pronto! '+data.filename+' ('+data.size_kb+' KB)');
+        _setRawDownloadRow(true,data.filename,data.size_kb);
+        setBadge('badge-raw-ready',true);
+        var btn=document.getElementById('btn-capture-raw');
+        if(btn)btn.disabled=false;
+        showToast('DNG pronto: '+data.size_kb+' KB',false);
+      } else {
+        // ainda processando - agenda proximo poll
+        _rawPollTimer=setTimeout(_pollRawReady,500);
+      }
+    })
+    .catch(function(e){
+      _setRawStatus('❌ Polling falhou: '+e.message);
+      var btn=document.getElementById('btn-capture-raw');
+      if(btn)btn.disabled=false;
+    });
+}
+
+// Bug #7 fix: fetch() + Blob URL forca download independente de origem
+function downloadRawDng(btn){
+  if(btn)btn.disabled=true;
+  _setRawStatus('⏬ Baixando DNG...');
+
+  fetch('/api/raw/result')
+    .then(function(r){
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      var cd=r.headers.get('Content-Disposition')||'';
+      var match=cd.match(/filename=["']?([^"'\s]+)["']?/);
+      var filename=match?match[1]:'raw_capture.dng';
+      return r.blob().then(function(blob){return {blob:blob,filename:filename};});
+    })
+    .then(function(obj){
+      var url=URL.createObjectURL(obj.blob);
+      var a=document.createElement('a');
+      a.href=url;
+      a.download=obj.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      _setRawStatus('✅ Download concluido: '+obj.filename);
+      showToast('DNG baixado com sucesso',false);
+    })
+    .catch(function(e){
+      _setRawStatus('❌ Download falhou: '+e.message);
+      showToast('Falha no download',true);
+    })
+    .finally(function(){
+      if(btn)btn.disabled=false;
+    });
+}
+
+// ─────────────────────────────────────────────────────
+
 function applyCameraCapabilities(camId){var cap=getCap(camId);if(!cap)return;buildResolutionButtons(cap.available_resolutions||[],cap.current_resolution);buildFpsButtons(cap.fps_ranges||null,cap.current_fps);buildFocusModeButtons(cap.supported_af_modes||cap.af_modes||[],cap.current_af_mode);buildWBButtons(cap.supported_awb_modes||cap.awb_modes||[],cap.current_wb);updateOISCapability(cap.has_ois||false);buildOpticalZoomButtons(cap.lenses||null,cap.current_focal_length);showCard('card-postproc',cap.supports_manual_post_processing||cap.has_postproc||false);if(cap.iso_range){var minIso=cap.iso_range[0],maxIso=cap.iso_range[1];var labels=document.querySelector('#card-iso .rlabels');if(labels)labels.innerHTML='<span>'+minIso+'</span><span>'+Math.round((minIso+maxIso)/2)+'</span><span>'+maxIso+'</span>'}}
 
 function applyAdvancedVision(s){
@@ -86,12 +195,16 @@ function applyAdvancedVision(s){
   var depthMean=(adv.depth_mean_mm!==undefined)?adv.depth_mean_mm:s.depth_mean_mm;
   var depthMin=(adv.depth_min_mm!==undefined)?adv.depth_min_mm:s.depth_min_mm;
   var depthMax=(adv.depth_max_mm!==undefined)?adv.depth_max_mm:s.depth_max_mm;
+  // raw_ready e raw_filename do advanced_vision
+  var rawReady=(adv.raw_ready!==undefined)?adv.raw_ready:false;
+  var rawFilename=(adv.raw_filename!==undefined)?adv.raw_filename:'';
 
   setToggleChecked('toggle-yuv',yuv);
   setToggleChecked('toggle-raw',raw);
   setToggleChecked('toggle-depth',depth);
   setBadge('badge-yuv',!!yuv);
   setBadge('badge-raw',!!raw);
+  setBadge('badge-raw-ready',!!rawReady);
   setBadge('badge-depth',!!depth);
   setText('adv-yuv-status',yuv?'ATIVO':'OFF');
   setText('adv-raw-status',raw?'ATIVO':'OFF');
@@ -99,6 +212,15 @@ function applyAdvancedVision(s){
   setText('adv-yuv-ts',formatNs(yuvTs));
   setText('adv-depth-mean',depthMean&&depthMean>0?depthMean.toFixed(1)+' mm':'-');
   setText('adv-depth-range',(depthMin&&depthMin>0||depthMax&&depthMax>0)?(depthMin+' / '+depthMax+' mm'):'-');
+
+  // Atualiza linha de download se raw ficou pronto via status poll
+  if(rawReady&&rawFilename){
+    var row=document.getElementById('raw-download-row');
+    // so mostra se o botao de download ainda nao estava visivel
+    if(row&&row.style.display==='none'){
+      _setRawDownloadRow(true,rawFilename,'?');
+    }
+  }
 
   var bar=document.getElementById('depth-meter-bar');
   if(bar){

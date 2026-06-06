@@ -23,6 +23,7 @@
     <div class="badge" id="badge-rggb" style="display:none">🌈 RGGB</div>
     <div class="badge" id="badge-yuv" style="display:none">🟦 YUV</div>
     <div class="badge" id="badge-raw" style="display:none">📷 RAW</div>
+    <div class="badge" id="badge-raw-ready" style="display:none">✅ DNG</div>
     <div class="badge" id="badge-depth" style="display:none">🧭 DEPTH</div>
   </div>
 
@@ -95,6 +96,28 @@
         <label class="switch"><input type="checkbox" id="toggle-depth" onchange="toggleDepth(this)"><span class="sw"></span></label>
       </div>
     </div>
+
+    <!-- Bloco RAW Still Capture -->
+    <div id="card-raw-capture" style="margin-top:14px;padding:12px;background:var(--card-bg,#1a1a1a);border-radius:8px;border:1px solid var(--border,#333)">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--text)">📸 Captura RAW Still</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">Salva DNG no DCIM do dispositivo e disponibiliza para download</div>
+        </div>
+        <button id="btn-capture-raw" onclick="captureRaw(this)" style="min-width:130px">
+          📷 Capturar RAW
+        </button>
+      </div>
+      <div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--muted)">Status:</span>
+        <span id="raw-capture-status" style="font-size:12px;color:var(--text)">-</span>
+      </div>
+      <div id="raw-download-row" style="display:none;margin-top:10px">
+        <button onclick="downloadRawDng(this)" style="width:100%">⬇️ Baixar DNG (<span id="raw-file-size">-</span> KB)</button>
+        <div style="font-size:10px;color:var(--muted);margin-top:4px;word-break:break-all" id="raw-file-name">-</div>
+      </div>
+    </div>
+
     <div class="advanced-stats">
       <div class="monitor-cell"><div class="mc-label">YUV Status</div><div class="mc-val" id="adv-yuv-status">-</div></div>
       <div class="monitor-cell"><div class="mc-label">RAW Status</div><div class="mc-val" id="adv-raw-status">-</div></div>
