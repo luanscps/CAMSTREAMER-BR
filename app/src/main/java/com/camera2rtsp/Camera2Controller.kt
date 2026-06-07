@@ -815,11 +815,13 @@ class Camera2Controller {
             Log.d(tag, "focusMode -> $it")
         }
 
+        // fix: cam.triggerAutoFocus() não existe na lib — usa CaptureRequest diretamente
         params["afTrigger"]?.let {
             post {
-                runCatching { cam.triggerAutoFocus() }
-                    .onFailure { Log.e(tag, "afTrigger falhou", it) }
-                Log.d(tag, "afTrigger disparado")
+                val ok = setCustomRequest { b ->
+                    b.set(CaptureRequest.CONTROL_AF_TRIGGER, CameraMetadata.CONTROL_AF_TRIGGER_START)
+                }
+                Log.d(tag, "afTrigger ok=$ok")
             }
         }
 
@@ -954,6 +956,7 @@ class Camera2Controller {
             applyRggbGains(cam)
         }
 
+        // fix: cam.changeVideoCamera() não existe — usa cam.changeCamera(String)
         params["camera"]?.let { camIdAny ->
             val newCamId = camIdAny.toString()
             if (newCamId != currentCameraId) {
@@ -962,7 +965,7 @@ class Camera2Controller {
                 post {
                     runCatching {
                         cam.stopPreview()
-                        cam.changeVideoCamera(newCamId.toInt())
+                        cam.changeCamera(newCamId)
                         cam.startPreview()
                     }.onFailure { Log.e(tag, "changeCamera falhou", it) }
                     Log.d(tag, "camera -> $newCamId")
@@ -978,7 +981,7 @@ class Camera2Controller {
                 post {
                     runCatching {
                         cam.stopPreview()
-                        cam.changeVideoCamera(newCamId.toInt())
+                        cam.changeCamera(newCamId)
                         cam.startPreview()
                     }.onFailure { Log.e(tag, "changeCamera falhou", it) }
                     Log.d(tag, "camera_id -> $newCamId")
