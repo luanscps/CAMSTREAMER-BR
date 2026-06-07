@@ -1091,8 +1091,14 @@ class Camera2Controller {
         else      -> default
     }
 
-    fun discoverAllCameras(context: Context): List<CameraCapabilities> =
-        CameraCapabilitiesReader.discoverAllCameras(context)
+    fun discoverAllCameras(context: Context): List<CameraCapabilities> {
+        val mgr = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        return mgr.cameraIdList.mapNotNull { id ->
+            runCatching { CameraCapabilitiesReader.read(context, id) }
+                .onFailure { Log.w(tag, "discoverAllCameras: falhou para id=$id — ${it.message}") }
+                .getOrNull()
+        }
+    }
 
     fun release() {
         releaseYuvProcessor()
