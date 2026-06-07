@@ -22,14 +22,16 @@ import java.util.concurrent.LinkedBlockingQueue
  * O método processImage() recebe Image + TotalCaptureResult
  * e executa o DngCreator em thread dedicada.
  *
- * FLUXO CORRETO (ImageReader próprio, fora da lib RootEncoder):
+ * FLUXO CORRETO:
  *   captureRawStill() cria ImageReader próprio
- *   onImageAvailable → processImage(image, result) diretamente
+ *   onImageAvailable → processImage(image, result)
+ *   rawHandler.post { buildDng() } → onRawFrame() → captureLatch.countDown()
+ *   finally { image.close() }  ← Único ponto de close, após DngCreator terminar
  *
- * processImage() mantém a Image ABERTA até o DngCreator terminar de
- * escrever no ByteArrayOutputStream — fecha no finally. Isso garante
- * que o DngCreator acessa o buffer nativo diretamente, sem alocar
- * os ~23 MB do frame RAW no heap Java.
+ * A Image é mantida ABERTA até o DngCreator terminar de escrever no
+ * ByteArrayOutputStream — fechada no finally. Isso garante que o
+ * DngCreator acessa o buffer nativo diretamente, sem alocar os ~23 MB
+ * do frame RAW no heap Java.
  */
 class RawCaptureManager(
     private val width: Int,
@@ -57,13 +59,15 @@ class RawCaptureManager(
 
     /**
      * Processa um par Image + TotalCaptureResult já disponíveis.
-     * Chamado por Camera2Controller.captureRawStill() via onImageAvailable
-     * do ImageReader próprio.
+     * Chamado por Camera2Controller via onImageAvailable do ImageReader próprio.
      *
-     * A Image é mantida ABERTA até o DngCreator terminar de escrever
-     * no ByteArrayOutputStream — fechada no finally. Isso garante que
-     * o DngCreator acessa o buffer nativo diretamente, sem alocar
-     * os ~23 MB do frame RAW no heap Java.
+     * IMPORTANTE: A Image NÃO deve ser fechada pelo chamador antes deste método
+     * terminar. O close() ocorre somente no finally do rawHandler.post{},
+     * após DngCreator.writeImage() concluir a leitura do buffer nativo.
+     *
+     * O captureLatch.countDown() também é disparado via onRawFrame callback
+     * em Camera2Controller — garantindo que a sessão RAW não seja fechada
+     * antes do DNG estar completamente gerado.
      */
     fun processImage(image: Image, result: TotalCaptureResult) {
         rawHandler.post {
@@ -86,8 +90,22 @@ class RawCaptureManager(
                 )
             } catch (e: Exception) {
                 Log.e(tag, "processImage: erro no processamento", e)
+                // fix: em caso de exceção, invoca onRawFrame com dngBytes vazio
+                // para garantir que captureLatch.countDown() seja chamado em Camera2Controller
+                runCatching {
+                    onRawFrame(
+                        RawFrame(
+                            width = width, height = height, timestampNs = 0L,
+                            buffer = ByteArray(0), isoUsed = 0, exposureNsUsed = 0L,
+                            captureResult = result, dngBytes = ByteArray(0)
+                        )
+                    )
+                }
             } finally {
+                // fix: único ponto de close — após DngCreator.writeImage() terminar
+                // NÃO feche a Image antes daqui
                 runCatching { image.close() }
+                Log.d(tag, "processImage: image.close() executado")
             }
         }
     }
