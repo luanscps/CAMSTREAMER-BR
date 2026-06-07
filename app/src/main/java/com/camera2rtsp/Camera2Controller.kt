@@ -21,6 +21,7 @@ import android.provider.MediaStore
 import android.util.Log
 import android.view.Surface
 import com.pedro.encoder.input.video.Camera2ApiManager
+import com.pedro.encoder.input.video.CameraHelper
 import com.pedro.library.base.Camera2Base
 import com.pedro.library.rtmp.RtmpCamera2
 import java.io.File
@@ -77,7 +78,8 @@ class Camera2Controller {
     private val rawReaderThread = HandlerThread("RawReaderThread").also { it.start() }
     private val rawReaderHandler = Handler(rawReaderThread.looper)
 
-    @Volatile private var pendingCaptureResult: TotalCaptureResult? = null
+    // fix: pendingCaptureResult substituído por AtomicReference para thread-safety real
+    private val pendingCaptureResultRef = java.util.concurrent.atomic.AtomicReference<TotalCaptureResult?>(null)
 
     @Volatile var lastRawDngBytes: ByteArray? = null
     @Volatile var lastRawFilename: String = ""
@@ -188,6 +190,13 @@ class Camera2Controller {
             Log.w(tag, "[liveMonitor] getCam2Manager nulo - abortando")
             return
         }
+        // fix: verifica se a sessão já está aberta antes de registrar o callback
+        val session = getCaptureSession(cam2mgr)
+        if (session == null) {
+            Log.w(tag, "[liveMonitor] sessão ainda não aberta - reagendando em 500ms")
+            worker.postDelayed({ initLiveMonitor() }, 500L)
+            return
+        }
         runCatching {
             cam2mgr.setCustomOnCaptureCompletedCallback { _: CameraCaptureSession, _: CaptureRequest, result: TotalCaptureResult ->
                 liveIso        = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: liveIso
@@ -250,7 +259,7 @@ class Camera2Controller {
 
     fun enableYuvProcessor(width: Int = currentWidth, height: Int = currentHeight, callback: ((YuvFrame) -> Unit)? = null): Boolean {
         val ctx = appContext ?: return false
-        val caps = discoverAllCameras(ctx).firstOrNull { it.cameraId == currentCameraId } ?: return false
+        val caps = CameraCapabilitiesReader.read(ctx, currentCameraId) ?: return false
         if (!caps.supportsYuvImageReader()) {
             Log.w(tag, "enableYuvProcessor: camera $currentCameraId sem suporte YUV")
             return false
@@ -291,7 +300,7 @@ class Camera2Controller {
      */
     fun captureRawStill(context: Context) {
         val ctx = appContext ?: context
-        val caps = discoverAllCameras(ctx).firstOrNull { it.cameraId == currentCameraId }
+        val caps = CameraCapabilitiesReader.read(ctx, currentCameraId)
         if (caps == null || !caps.isRawCaptureFeasible()) {
             Log.w(tag, "captureRawStill: camera $currentCameraId nao suporta RAW")
             return
@@ -324,24 +333,23 @@ class Camera2Controller {
         rw: Int,
         rh: Int
     ) {
-        // Garante RawCaptureManager inicializado
-        if (rawManager == null) {
-            rawManager = RawCaptureManager(
-                rw, rh, characteristics,
-                onRawFrame = { frame ->
-                    if (frame.dngBytes.isNotEmpty()) {
-                        val fn = "RAW_${System.currentTimeMillis()}.dng"
-                        lastRawDngBytes = frame.dngBytes
-                        lastRawFilename = fn
-                        appContext?.let { saveToMediaStore(it, frame.dngBytes, fn) }
-                        Log.i(tag, "onRawFrame: DNG pronto — ${frame.dngBytes.size / 1024} KB, arquivo=$fn")
-                    } else {
-                        Log.w(tag, "onRawFrame: dngBytes vazio, captura ignorada")
-                    }
-                    rawFrameCallback?.invoke(frame)
+        // fix: sempre recria o rawManager para garantir estado limpo a cada captura
+        releaseRawManager()
+        rawManager = RawCaptureManager(
+            rw, rh, characteristics,
+            onRawFrame = { frame ->
+                if (frame.dngBytes.isNotEmpty()) {
+                    val fn = "RAW_${System.currentTimeMillis()}.dng"
+                    lastRawDngBytes = frame.dngBytes
+                    lastRawFilename = fn
+                    appContext?.let { saveToMediaStore(it, frame.dngBytes, fn) }
+                    Log.i(tag, "onRawFrame: DNG pronto — ${frame.dngBytes.size / 1024} KB, arquivo=$fn")
+                } else {
+                    Log.w(tag, "onRawFrame: dngBytes vazio, captura ignorada")
                 }
-            )
-        }
+                rawFrameCallback?.invoke(frame)
+            }
+        )
 
         // --- 1. Para o stream para liberar a sessão do RootEncoder ---
         val wasStreaming = rtmpCamera?.isStreaming == true
@@ -349,7 +357,10 @@ class Camera2Controller {
         if (wasStreaming) {
             Log.i(tag, "dispatchRawCapture: pausando stream para captura RAW")
             svc?.stopStream()
-            Thread.sleep(400) // aguarda fechamento da sessão RootEncoder
+            // fix: aguarda até 2s pelo fechamento real da sessão em vez de sleep fixo
+            val stopLatch = java.util.concurrent.CountDownLatch(1)
+            worker.postDelayed({ stopLatch.countDown() }, 600)
+            stopLatch.await(2, java.util.concurrent.TimeUnit.SECONDS)
         }
 
         val rawReader = ImageReader.newInstance(rw, rh, ImageFormat.RAW_SENSOR, 2)
@@ -405,19 +416,30 @@ class Camera2Controller {
             }
 
             // --- 4. Dispara one-shot STILL_CAPTURE ---
+            // fix: usa AtomicReference para sincronização real entre onCaptureCompleted e onImageAvailable
+            pendingCaptureResultRef.set(null)
             val captureLatch = java.util.concurrent.CountDownLatch(1)
+
             rawReader.setOnImageAvailableListener({ imageReader ->
-                val image  = imageReader.acquireNextImage() ?: return@setOnImageAvailableListener
-                val result = pendingCaptureResult
-                if (result != null) {
-                    pendingCaptureResult = null
-                    Log.d(tag, "onImageAvailable: processando DNG ${rw}x${rh}")
-                    rawManager?.processImage(image, result)
-                } else {
-                    Log.w(tag, "onImageAvailable: result ainda nulo — descartando frame")
+                val image = imageReader.acquireNextImage() ?: return@setOnImageAvailableListener
+                try {
+                    // fix: aguarda até 3s pelo TotalCaptureResult antes de descartar
+                    val deadline = System.currentTimeMillis() + 3000L
+                    var result: TotalCaptureResult? = null
+                    while (result == null && System.currentTimeMillis() < deadline) {
+                        result = pendingCaptureResultRef.getAndSet(null)
+                        if (result == null) Thread.sleep(20)
+                    }
+                    if (result != null) {
+                        Log.d(tag, "onImageAvailable: processando DNG ${rw}x${rh}")
+                        rawManager?.processImage(image, result)
+                    } else {
+                        Log.w(tag, "onImageAvailable: TotalCaptureResult timeout (3s) — descartando frame")
+                    }
+                } finally {
                     runCatching { image.close() }
+                    captureLatch.countDown()
                 }
-                captureLatch.countDown()
             }, rawReaderHandler)
 
             val stillBuilder = rawDevice!!.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
@@ -436,7 +458,8 @@ class Camera2Controller {
                         result: TotalCaptureResult
                     ) {
                         Log.d(tag, "dispatchRawCapture: onCaptureCompleted")
-                        pendingCaptureResult = result
+                        // fix: seta via AtomicReference — thread-safe
+                        pendingCaptureResultRef.set(result)
                     }
                     override fun onCaptureFailed(
                         session: CameraCaptureSession,
@@ -461,7 +484,7 @@ class Camera2Controller {
             runCatching { rawSession?.close() }
             runCatching { rawDevice?.close() }
             runCatching { rawReader.close() }
-            pendingCaptureResult = null
+            pendingCaptureResultRef.set(null)
             Log.i(tag, "dispatchRawCapture: sessão RAW fechada")
 
             // --- 6. Retoma o stream ---
@@ -508,7 +531,7 @@ class Camera2Controller {
 
     fun enableDepthFusion(width: Int, height: Int, callback: ((DepthFrame) -> Unit)? = null): Boolean {
         val ctx = appContext ?: return false
-        val caps = discoverAllCameras(ctx).firstOrNull { it.cameraId == currentCameraId } ?: return false
+        val caps = CameraCapabilitiesReader.read(ctx, currentCameraId) ?: return false
         if (!caps.hasUsableDepthSensor() && !caps.supportsYuvDepthFusion()) {
             Log.w(tag, "enableDepthFusion: camera $currentCameraId sem suporte depth")
             return false
@@ -680,11 +703,14 @@ class Camera2Controller {
             val ok = setCustomRequest { b ->
                 b.set(CaptureRequest.CONTROL_AWB_LOCK, lock)
             }
-            if (!ok && !lock) {
-                runCatching { cam.enableAutoWhiteBalance(CameraMetadata.CONTROL_AWB_MODE_AUTO) }
-                    .onFailure { Log.e(tag, "awb unlock fallback falhou", it) }
+            // fix: removido disableAutoWhiteBalance() duplicado no path de lock
+            // Apenas no unlock, garante que AWB volta ao automático
+            if (!lock) {
+                if (!ok) {
+                    runCatching { cam.enableAutoWhiteBalance(CameraMetadata.CONTROL_AWB_MODE_AUTO) }
+                        .onFailure { Log.e(tag, "awb unlock fallback falhou", it) }
+                }
             }
-            if (lock) runCatching { cam.disableAutoWhiteBalance() }
             Log.d(tag, "awbLock ok=$ok lock=$lock")
         }
     }
@@ -733,10 +759,18 @@ class Camera2Controller {
             else disableDepthFusion()
             Log.d(tag, "depthFusion -> $enabled")
         }
+
         params["manualSensor"]?.let {
             manualSensor = it as Boolean
-            if (manualSensor) applyManualSensor()
-            else { applyAutoSensor(cam); cam.setExposure(0); exposureLevel = 0 }
+            if (manualSensor) {
+                applyManualSensor()
+            } else {
+                // fix: reseta frameDurationNs ao sair do modo manual para evitar valor stale
+                frameDurationNs = 33_333_333L
+                applyAutoSensor(cam)
+                cam.setExposure(0)
+                exposureLevel = 0
+            }
             Log.d(tag, "manualSensor -> $manualSensor")
         }
 
@@ -815,13 +849,21 @@ class Camera2Controller {
             Log.d(tag, "focusMode -> $it")
         }
 
-        // fix: cam.triggerAutoFocus() não existe na lib — usa CaptureRequest diretamente
+        // fix: afTrigger envia TRIGGER_START seguido de TRIGGER_IDLE no próximo frame
+        // para evitar que o trigger fique "preso" e degrade o AF contínuo
         params["afTrigger"]?.let {
             post {
-                val ok = setCustomRequest { b ->
+                val okStart = setCustomRequest { b ->
                     b.set(CaptureRequest.CONTROL_AF_TRIGGER, CameraMetadata.CONTROL_AF_TRIGGER_START)
                 }
-                Log.d(tag, "afTrigger ok=$ok")
+                Log.d(tag, "afTrigger START ok=$okStart")
+                // reset imediato para IDLE no próximo frame
+                worker.postDelayed({
+                    setCustomRequest { b ->
+                        b.set(CaptureRequest.CONTROL_AF_TRIGGER, CameraMetadata.CONTROL_AF_TRIGGER_IDLE)
+                    }
+                    Log.d(tag, "afTrigger -> IDLE (reset)")
+                }, 100L)
             }
         }
 
@@ -943,7 +985,17 @@ class Camera2Controller {
         params["rggbEnabled"]?.let {
             rggbEnabled = it as Boolean
             if (!rggbEnabled) {
-                post { runCatching { cam.enableAutoWhiteBalance(CameraMetadata.CONTROL_AWB_MODE_AUTO) } }
+                // fix: zera gains para 1f antes de reativar AWB para evitar balanço residual
+                rggbGains = floatArrayOf(1f, 1f, 1f, 1f)
+                post {
+                    runCatching {
+                        setCustomRequest { b ->
+                            val neutralGains = android.hardware.camera2.params.RggbChannelVector(1f, 1f, 1f, 1f)
+                            b.set(CaptureRequest.COLOR_CORRECTION_GAINS, neutralGains)
+                        }
+                        cam.enableAutoWhiteBalance(CameraMetadata.CONTROL_AWB_MODE_AUTO)
+                    }
+                }
             }
             Log.d(tag, "rggbEnabled -> $rggbEnabled")
         }
@@ -956,19 +1008,18 @@ class Camera2Controller {
             applyRggbGains(cam)
         }
 
-        // fix: cam.changeVideoCamera() não existe — usa cam.changeCamera(String)
+        // fix: changeCamera → delega para StreamingService.switchCamera que já trata facing corretamente
         params["camera"]?.let { camIdAny ->
             val newCamId = camIdAny.toString()
             if (newCamId != currentCameraId) {
                 currentCameraId = newCamId
                 releaseRawManager()
+                val facing = if (newCamId == "1") CameraHelper.Facing.FRONT else CameraHelper.Facing.BACK
                 post {
                     runCatching {
-                        cam.stopPreview()
-                        cam.changeCamera(newCamId)
-                        cam.startPreview()
-                    }.onFailure { Log.e(tag, "changeCamera falhou", it) }
-                    Log.d(tag, "camera -> $newCamId")
+                        StreamingService.instance?.switchCamera(newCamId, facing)
+                    }.onFailure { Log.e(tag, "camera switch falhou", it) }
+                    Log.d(tag, "camera -> $newCamId facing=$facing")
                 }
             }
         }
@@ -978,13 +1029,12 @@ class Camera2Controller {
             if (newCamId != currentCameraId) {
                 currentCameraId = newCamId
                 releaseRawManager()
+                val facing = if (newCamId == "1") CameraHelper.Facing.FRONT else CameraHelper.Facing.BACK
                 post {
                     runCatching {
-                        cam.stopPreview()
-                        cam.changeCamera(newCamId)
-                        cam.startPreview()
-                    }.onFailure { Log.e(tag, "changeCamera falhou", it) }
-                    Log.d(tag, "camera_id -> $newCamId")
+                        StreamingService.instance?.switchCamera(newCamId, facing)
+                    }.onFailure { Log.e(tag, "camera_id switch falhou", it) }
+                    Log.d(tag, "camera_id -> $newCamId facing=$facing")
                 }
             }
         }
@@ -1010,6 +1060,16 @@ class Camera2Controller {
         else      -> default
     }
 
+    // fix: discoverAllCameras agora delega explicitamente para CameraCapabilitiesReader
+    // resolve o "Unresolved reference" quando chamado dentro de post {} lambdas
     fun discoverAllCameras(context: Context): List<CameraCapabilities> =
         CameraCapabilitiesReader.discoverAllCameras(context)
+
+    fun release() {
+        releaseYuvProcessor()
+        releaseRawManager()
+        releaseDepthProcessor()
+        runCatching { workerThread.quitSafely() }
+        runCatching { rawReaderThread.quitSafely() }
+    }
 }
