@@ -17,14 +17,14 @@ import java.util.concurrent.LinkedBlockingQueue
  * Gerencia a captura e processamento de frames RAW (DNG).
  *
  * Versão refatorada: não possui mais ImageReader próprio.
- * A surface é registrada na CameraCaptureSession pela lib via
- * Camera2ApiManager.addImageListener(), que chama onImageAvailable
- * diretamente. O método processImage() recebe Image + TotalCaptureResult
+ * A surface é registrada na CameraCaptureSession via ImageReader
+ * independente criado em Camera2Controller.captureRawStill().
+ * O método processImage() recebe Image + TotalCaptureResult
  * e executa o DngCreator em thread dedicada.
  *
- * FLUXO CORRETO (hardware entrega Image ANTES do TotalCaptureResult):
- *   onImageAvailable  → Camera2Controller guarda Image em pendingImageQueue
- *   onCaptureCompleted → Camera2Controller drena fila → processImage(img, result)
+ * FLUXO CORRETO (ImageReader próprio, fora da lib RootEncoder):
+ *   captureRawStill() cria ImageReader próprio
+ *   onImageAvailable → processImage(image, result) diretamente
  *
  * processImage() mantém a Image ABERTA até o DngCreator terminar de
  * escrever no ByteArrayOutputStream — fecha no finally. Isso garante
@@ -57,8 +57,8 @@ class RawCaptureManager(
 
     /**
      * Processa um par Image + TotalCaptureResult já disponíveis.
-     * Chamado por Camera2Controller.onCaptureCompleted() após drenar
-     * a pendingImageQueue.
+     * Chamado por Camera2Controller.captureRawStill() via onImageAvailable
+     * do ImageReader próprio.
      *
      * A Image é mantida ABERTA até o DngCreator terminar de escrever
      * no ByteArrayOutputStream — fechada no finally. Isso garante que
@@ -90,16 +90,6 @@ class RawCaptureManager(
                 runCatching { image.close() }
             }
         }
-    }
-
-    /**
-     * Caminho legado — NÃO deve ser chamado no fluxo one-shot.
-     * Camera2Controller gerencia o pareamento Image↔Result diretamente.
-     * Se chamado por engano, fecha a Image imediatamente sem alocar nada.
-     */
-    fun onImageAvailable(image: Image) {
-        Log.w(tag, "onImageAvailable legado chamado — fechando Image sem processar")
-        runCatching { image.close() }
     }
 
     /**

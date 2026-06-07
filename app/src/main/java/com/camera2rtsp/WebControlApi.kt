@@ -62,7 +62,6 @@ object WebControlApi {
 
         val advancedVision = mapOf(
             "yuv_enabled"      to c.yuvProcessorEnabled,
-            "raw_enabled"      to c.rawCaptureEnabled,
             "depth_enabled"    to c.depthFusionEnabled,
             "last_yuv_ts_ns"   to c.lastYuvTimestampNs,
             "depth_mean_mm"    to c.lastDepthMeanMm,
@@ -108,7 +107,6 @@ object WebControlApi {
             "monitor"            to monitor,
             "advanced_vision"    to advancedVision,
             "yuv_enabled"        to c.yuvProcessorEnabled,
-            "raw_enabled"        to c.rawCaptureEnabled,
             "depth_enabled"      to c.depthFusionEnabled,
             "last_yuv_ts_ns"     to c.lastYuvTimestampNs,
             "depth_mean_mm"      to c.lastDepthMeanMm,
@@ -153,7 +151,6 @@ object WebControlApi {
                 params.containsKey("camera") ||
                 params.containsKey("camera_id") ||
                 params.containsKey("yuvCapture") ||
-                params.containsKey("rawCapture") ||
                 params.containsKey("depthFusion")
             ) {
                 capsCache = null
