@@ -24,10 +24,13 @@ import java.util.concurrent.TimeUnit
  * diretamente. O método processImage() recebe Image + TotalCaptureResult
  * e executa o DngCreator em thread dedicada.
  *
- * IMPORTANTE: onImageAvailable() copia os dados do plano RAW e fecha a
- * Image IMEDIATAMENTE na thread do callback (antes de qualquer post
- * assíncrono) para liberar o slot do ImageReader e evitar o crash
- * "maxImages has already been acquired".
+ * IMPORTANTE: processImage() mantém a Image ABERTA até o DngCreator
+ * terminar de escrever — fecha no finally. Isso evita o OOM de 23 MB
+ * que ocorria ao copiar o buffer RAW para o heap Java antes do DngCreator.
+ *
+ * onImageAvailable() (caminho legado) ainda usa copyAndClose pois não
+ * tem acesso ao TotalCaptureResult na mesma thread, e o DngCreator não
+ * pode ser usado sem ele.
  */
 class RawCaptureManager(
     private val width: Int,
@@ -59,7 +62,7 @@ class RawCaptureManager(
 
     /**
      * Dados do plano RAW já copiados para heap (Image já fechada).
-     * Usado internamente para desacoplar a cópia do processamento.
+     * Usado apenas pelo caminho legado (onImageAvailable).
      */
     private data class RawPlane(
         val imgWidth: Int,
@@ -71,23 +74,25 @@ class RawCaptureManager(
     /**
      * Processa um par Image + TotalCaptureResult já disponíveis.
      * Chamado pelo captureCallback one-shot de captureRawStill().
-     * Libera a Image após o DNG ser gerado.
+     *
+     * A Image é mantida ABERTA até o DngCreator terminar de escrever
+     * no ByteArrayOutputStream — fechada no finally. Isso garante que
+     * o DngCreator acessa o buffer nativo diretamente, sem alocar
+     * os ~23 MB do frame RAW no heap Java.
      */
     fun processImage(image: Image, result: TotalCaptureResult) {
-        // Copia os bytes e fecha a Image antes de postar na rawHandler
-        val plane = copyAndClose(image) ?: return
         rawHandler.post {
             try {
-                onResultConsumed()
-                val dngBytes = buildDngFromBytes(plane, result)
+                val dngBytes = buildDng(image, result)
                 val iso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: 0
                 val exp = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 0L
+                onResultConsumed()
                 onRawFrame(
                     RawFrame(
-                        width          = plane.imgWidth,
-                        height         = plane.imgHeight,
-                        timestampNs    = plane.timestampNs,
-                        buffer         = plane.rawBytes,
+                        width          = image.width,
+                        height         = image.height,
+                        timestampNs    = image.timestamp,
+                        buffer         = ByteArray(0), // buffer bruto não necessário no path one-shot
                         isoUsed        = iso,
                         exposureNsUsed = exp,
                         captureResult  = result,
@@ -96,6 +101,8 @@ class RawCaptureManager(
                 )
             } catch (e: Exception) {
                 Log.e(tag, "processImage: erro no processamento", e)
+            } finally {
+                runCatching { image.close() }
             }
         }
     }
@@ -118,11 +125,12 @@ class RawCaptureManager(
      * assíncrono. Isso libera o slot do ImageReader e evita o crash
      * "maxImages has already been acquired" quando frames RAW chegam
      * em sequência rápida.
+     *
+     * Neste caminho o DngCreator não pode ser usado pois a Image
+     * já foi fechada — o RawFrame.dngBytes fica vazio.
      */
     fun onImageAvailable(image: Image) {
-        // --- Copia e fecha a Image NA THREAD DO CALLBACK ---
         val plane = copyAndClose(image) ?: return
-        // --- Slot liberado; agora pode postar o trabalho pesado ---
         rawHandler.post {
             try {
                 val result = resultQueue.poll(2, TimeUnit.SECONDS)
@@ -131,7 +139,6 @@ class RawCaptureManager(
                     return@post
                 }
                 onResultConsumed()
-                val dngBytes = buildDngFromBytes(plane, result)
                 val iso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: 0
                 val exp = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 0L
                 onRawFrame(
@@ -143,7 +150,7 @@ class RawCaptureManager(
                         isoUsed        = iso,
                         exposureNsUsed = exp,
                         captureResult  = result,
-                        dngBytes       = dngBytes
+                        dngBytes       = ByteArray(0) // DNG indisponível no caminho legado
                     )
                 )
             } catch (e: Exception) {
@@ -154,7 +161,7 @@ class RawCaptureManager(
 
     /**
      * Copia o plano[0] da Image para um ByteArray no heap e fecha a
-     * Image imediatamente. Retorna null se a Image for inválida.
+     * Image imediatamente. Usado apenas pelo caminho legado (onImageAvailable).
      */
     private fun copyAndClose(image: Image): RawPlane? {
         return try {
@@ -174,30 +181,11 @@ class RawCaptureManager(
     }
 
     /**
-     * Gera DNG a partir de um RawPlane já copiado para o heap.
-     * Usa um ImageReader temporário em memória para alimentar o DngCreator.
+     * Gera DNG a partir de uma Image ainda aberta e seu TotalCaptureResult.
+     * O DngCreator.writeImage() lê o buffer nativo da Image diretamente
+     * para o ByteArrayOutputStream — nenhum ByteArray de 23 MB é alocado
+     * no heap Java. A Image deve ser fechada pelo chamador após este retorno.
      */
-    private fun buildDngFromBytes(plane: RawPlane, result: TotalCaptureResult): ByteArray {
-        // Recria um ImageReader temporário apenas para ter um Image válido
-        // para o DngCreator — necessário pois DngCreator.writeImage() exige
-        // um android.media.Image real, não um ByteBuffer direto.
-        val reader = ImageReader.newInstance(plane.imgWidth, plane.imgHeight, ImageFormat.RAW_SENSOR, 1)
-        return try {
-            // Não há API pública para injetar bytes num ImageReader sem câmera;
-            // usamos o path direto via ByteArrayOutputStream com o buffer copiado.
-            // O DngCreator só aceita Image — fallback: retorna raw bytes como DNG stub
-            // se não conseguirmos reconstruir o Image.
-            //
-            // Na prática, o DngCreator é alimentado via processImage() (one-shot)
-            // que ainda recebe a Image original. Para o caminho legado (onImageAvailable),
-            // retornamos os bytes RAW brutos como payload do RawFrame.dngBytes.
-            Log.w(tag, "buildDngFromBytes: DNG completo requer Image original; retornando RAW bruto")
-            plane.rawBytes
-        } finally {
-            runCatching { reader.close() }
-        }
-    }
-
     private fun buildDng(image: Image, result: TotalCaptureResult): ByteArray {
         val out = ByteArrayOutputStream()
         return try {
