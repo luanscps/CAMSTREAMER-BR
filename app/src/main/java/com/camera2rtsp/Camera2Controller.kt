@@ -16,6 +16,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.provider.MediaStore
 import android.util.Log
+import android.view.Surface
 import com.pedro.encoder.input.video.Camera2ApiManager
 import com.pedro.library.base.Camera2Base
 import com.pedro.library.rtmp.RtmpCamera2
@@ -386,7 +387,8 @@ class Camera2Controller {
             val session = cam2?.let { getCaptureSession(it) }
             val device  = cam2?.let { getCameraDevice(it) }
             val handler = cam2?.let { getCameraHandler(it) }
-            val rawSurface = rawManager?.getSurface()
+            // fix: tipagem explicita como Surface? + surface() (funcao Kotlin, nao propriedade)
+            val rawSurface: Surface? = rawManager?.surface()
 
             // --- Caminho principal: one-shot via session.capture() ---
             if (session != null && device != null && rawSurface != null) {
@@ -395,7 +397,6 @@ class Camera2Controller {
 
                     // Propaga todos os parametros do repeating request (ISO, WB, zoom, etc.)
                     cam2.let { getBuilderInputSurface(it) }?.build()?.let { previewReq ->
-                        // Copia as keys relevantes do preview para o still
                         for (key in previewReq.keys) {
                             @Suppress("UNCHECKED_CAST")
                             val k = key as CaptureRequest.Key<Any>
@@ -406,7 +407,7 @@ class Camera2Controller {
                     stillBuilder.set(CaptureRequest.CONTROL_CAPTURE_INTENT,
                         CameraMetadata.CONTROL_CAPTURE_INTENT_STILL_CAPTURE)
 
-                    // Adiciona a surface RAW como target do still
+                    // fix: rawSurface e Surface non-null aqui (smartcast apos null-check acima)
                     stillBuilder.addTarget(rawSurface)
 
                     val captureCallback = object : CameraCaptureSession.CaptureCallback() {
@@ -429,6 +430,7 @@ class Camera2Controller {
                         }
                     }
 
+                    // handler pode ser null — neste caso o callback roda na CameraWorker thread (ok)
                     session.capture(stillBuilder.build(), captureCallback, handler)
                     Log.d(tag, "captureRawStill disparo one-shot enviado via session.capture()")
 
