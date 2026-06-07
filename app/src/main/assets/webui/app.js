@@ -103,7 +103,6 @@ function captureRaw(btn){
 
   fetch('/api/raw/capture',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
     .then(function(r){
-      // 202 = aceito e processando; qualquer outro codigo e erro
       if(r.status!==202&&!r.ok)throw new Error('HTTP '+r.status);
       _setRawStatus('⏳ Capturando RAW... aguarde');
       showToast('Captura RAW iniciada',false);
@@ -136,7 +135,6 @@ function _pollRawReady(){
         if(btn)btn.disabled=false;
         showToast('DNG pronto: '+data.size_kb+' KB',false);
       } else {
-        // ainda processando - agenda proximo poll
         _rawPollTimer=setTimeout(_pollRawReady,500);
       }
     })
@@ -147,10 +145,9 @@ function _pollRawReady(){
     });
 }
 
-// Bug #7 fix: fetch() + Blob URL forca download independente de origem
 function downloadRawDng(btn){
   if(btn)btn.disabled=true;
-  _setRawStatus('⏬ Baixando DNG...');
+  _setRawStatus('⬇️ Baixando DNG...');
 
   fetch('/api/raw/result')
     .then(function(r){
@@ -188,33 +185,30 @@ function applyCameraCapabilities(camId){var cap=getCap(camId);if(!cap)return;bui
 function applyAdvancedVision(s){
   var adv=s.advanced_vision||{};
   var yuv=(adv.yuv_enabled!==undefined)?adv.yuv_enabled:s.yuv_enabled;
-  var raw=(adv.raw_enabled!==undefined)?adv.raw_enabled:s.raw_enabled;
   var depth=(adv.depth_enabled!==undefined)?adv.depth_enabled:s.depth_enabled;
   var yuvTs=(adv.last_yuv_ts_ns!==undefined)?adv.last_yuv_ts_ns:s.last_yuv_ts_ns;
   var depthMean=(adv.depth_mean_mm!==undefined)?adv.depth_mean_mm:s.depth_mean_mm;
   var depthMin=(adv.depth_min_mm!==undefined)?adv.depth_min_mm:s.depth_min_mm;
   var depthMax=(adv.depth_max_mm!==undefined)?adv.depth_max_mm:s.depth_max_mm;
-  // raw_ready e raw_filename do advanced_vision
+  var rawEnabled=(adv.raw_enabled!==undefined)?adv.raw_enabled:s.raw_enabled;
   var rawReady=(adv.raw_ready!==undefined)?adv.raw_ready:false;
   var rawFilename=(adv.raw_filename!==undefined)?adv.raw_filename:'';
 
   setToggleChecked('toggle-yuv',yuv);
   setToggleChecked('toggle-depth',depth);
   setBadge('badge-yuv',!!yuv);
-  setBadge('badge-raw',!!raw);
+  setBadge('badge-raw',!!rawEnabled);
   setBadge('badge-raw-ready',!!rawReady);
   setBadge('badge-depth',!!depth);
   setText('adv-yuv-status',yuv?'ATIVO':'OFF');
-  setText('adv-raw-status',raw?'ATIVO':'OFF');
+  setText('adv-raw-status',rawEnabled?'ATIVO':'OFF');
   setText('adv-depth-status',depth?'ATIVO':'OFF');
   setText('adv-yuv-ts',formatNs(yuvTs));
   setText('adv-depth-mean',depthMean&&depthMean>0?depthMean.toFixed(1)+' mm':'-');
   setText('adv-depth-range',(depthMin&&depthMin>0||depthMax&&depthMax>0)?(depthMin+' / '+depthMax+' mm'):'-');
 
-  // Atualiza linha de download se raw ficou pronto via status poll
   if(rawReady&&rawFilename){
     var row=document.getElementById('raw-download-row');
-    // so mostra se o botao de download ainda nao estava visivel
     if(row&&row.style.display==='none'){
       _setRawDownloadRow(true,rawFilename,'?');
     }
@@ -229,7 +223,7 @@ function applyAdvancedVision(s){
 
   var card=document.getElementById('card-advanced-vision');
   if(card){
-    if(yuv||raw||depth) card.classList.add('advanced-active');
+    if(yuv||rawEnabled||depth) card.classList.add('advanced-active');
     else card.classList.remove('advanced-active');
   }
 }
@@ -240,6 +234,13 @@ function applyStatus(s){
   if(s.streaming){if(dot)dot.classList.remove('off');if(lbl)lbl.textContent='AO VIVO';}
   else{if(dot)dot.classList.add('off');if(lbl)lbl.textContent='Parado';}
   setText('lbl-cam',s.camera_id);setText('lbl-res',s.resolution);setText('lbl-br',s.bitrate_kbps);
+  // Sincroniza slider e label de bitrate com o valor real do encoder
+  if(s.bitrate_kbps!=null&&s.bitrate_kbps>0){
+    var brSlider=document.getElementById('bitrate');
+    var brLabel=document.getElementById('br-value');
+    if(brSlider&&!brSlider._userDirty){brSlider.value=s.bitrate_kbps;}
+    if(brLabel&&!brSlider._userDirty){brLabel.textContent=s.bitrate_kbps;}
+  }
   var latEl=document.getElementById('lbl-lat');
   if(latEl&&s.latency_ms!==undefined){latEl.textContent=s.latency_ms+'ms';latEl.className=s.latency_ms<100?'lat-ok':s.latency_ms<300?'lat-warn':'lat-bad'}
   setText('info-focusmode',s.focus_mode);
@@ -269,4 +270,15 @@ function pollStatus(){
     .catch(function(e){clearTimeout(timeoutId);if(e.name==='AbortError')return;_pollFail++;if(_pollFail>3){var lbl=document.getElementById('lbl-stream');if(lbl)lbl.textContent='Sem conexão';var dot=document.getElementById('dot-stream');if(dot)dot.classList.add('off');}})
 }
 
-document.addEventListener('DOMContentLoaded',function(){pollStatus();setInterval(pollStatus,1000)});
+document.addEventListener('DOMContentLoaded',function(){
+  // Marca slider como 'sujado pelo usuario' para nao sobrescrever enquanto ele arrasta
+  var brSlider=document.getElementById('bitrate');
+  if(brSlider){
+    brSlider._userDirty=false;
+    brSlider.addEventListener('mousedown',function(){brSlider._userDirty=true;});
+    brSlider.addEventListener('touchstart',function(){brSlider._userDirty=true;},{passive:true});
+    brSlider.addEventListener('change',function(){setTimeout(function(){brSlider._userDirty=false;},2000);});
+  }
+  pollStatus();
+  setInterval(pollStatus,1000);
+});
