@@ -74,11 +74,8 @@ class Camera2Controller {
     var rawManager: RawCaptureManager? = null
     var rawFrameCallback: ((RawCaptureManager.RawFrame) -> Unit)? = null
 
-    // Flag atomico: true somente entre captureRawStill() e o consumo do
-    // TotalCaptureResult pelo RawCaptureManager.
     private val rawCapturePending = AtomicBoolean(false)
 
-    // Ultimo DNG capturado disponivel para download HTTP
     @Volatile var lastRawDngBytes: ByteArray? = null
     @Volatile var lastRawFilename: String = ""
 
@@ -214,7 +211,6 @@ class Camera2Controller {
                     CaptureResult.CONTROL_AE_STATE_FLASH_REQUIRED -> "flash_required"
                     else                                           -> "idle"
                 }
-                // Fallback legado: offerResult caso captureCallback one-shot falhe
                 if (rawCapturePending.get()) {
                     rawManager?.offerResult(result)
                 }
@@ -284,7 +280,8 @@ class Camera2Controller {
      * CameraCaptureSession — resolve o IllegalArgumentException
      * 'unconfigured Surface' que ocorria no session.capture().
      *
-     * O liveMonitor é reagendado após a reabertura da câmera.
+     * Usa object : Camera2ApiManager.ImageCallback para evitar ambiguidade
+     * de tipo na interoperação Java/Kotlin com SAM conversion.
      */
     fun enableRawCapture(width: Int, height: Int, callback: ((RawCaptureManager.RawFrame) -> Unit)? = null): Boolean {
         val ctx = appContext ?: return false
@@ -314,18 +311,16 @@ class Camera2Controller {
             onResultConsumed = { rawCapturePending.set(false) }
         )
 
-        // Registra o ImageReader RAW na lib — ela fecha/reabre a câmera
-        // incluindo essa surface na nova CameraCaptureSession.
-        // Camera2ApiManager.ImageCallback é interface Java: precisa ser
-        // passada explicitamente para evitar erro de inferência de tipo.
         runCatching {
             cam2.addImageListener(
                 width, height,
                 ImageFormat.RAW_SENSOR,
                 /* maxImages = */ 2,
                 /* autoClose = */ false,
-                Camera2ApiManager.ImageCallback { image: Image ->
-                    rawManager?.onImageAvailable(image)
+                object : Camera2ApiManager.ImageCallback {
+                    override fun onImageAvailable(image: Image) {
+                        rawManager?.onImageAvailable(image)
+                    }
                 }
             )
             Log.i(tag, "enableRawCapture: addImageListener ok ${width}x${height}")
@@ -336,7 +331,6 @@ class Camera2Controller {
         }
 
         rawCaptureEnabled = true
-        // Reagenda liveMonitor após a reabertura da câmera pela lib
         initLiveMonitorDelayed(600L)
         Log.i(tag, "enableRawCapture ok ${width}x${height}")
         return true
@@ -350,21 +344,10 @@ class Camera2Controller {
         rawFrameCallback = null
         rawCaptureEnabled = false
         rawCapturePending.set(false)
-        // Reagenda liveMonitor após reabertura da câmera
         initLiveMonitorDelayed(600L)
         Log.i(tag, "disableRawCapture ok")
     }
 
-    /**
-     * Dispara uma captura RAW still via session.capture() one-shot.
-     *
-     * Pré-requisito: enableRawCapture() deve ter sido chamado antes para
-     * que a rawSurface já esteja registrada na CameraCaptureSession.
-     * Se não estiver, tenta registrar automaticamente antes de disparar.
-     *
-     * O captureCallback one-shot entrega Image + TotalCaptureResult
-     * diretamente ao rawManager.processImage(), sem depender do liveMonitor.
-     */
     fun captureRawStill(context: Context) {
         val ctx = appContext ?: context
         val caps = discoverAllCameras(ctx).firstOrNull { it.cameraId == currentCameraId }
@@ -386,7 +369,6 @@ class Camera2Controller {
         val rw = rawSize?.width  ?: currentWidth
         val rh = rawSize?.height ?: currentHeight
 
-        // Auto-habilita rawCapture se ainda não foi feito
         if (!rawCaptureEnabled || rawManager == null) {
             Log.i(tag, "captureRawStill: rawCapture nao estava habilitado, habilitando agora")
             val ok = enableRawCapture(rw, rh)
@@ -394,7 +376,6 @@ class Camera2Controller {
                 Log.e(tag, "captureRawStill: enableRawCapture falhou, abortando")
                 return
             }
-            // Aguarda a câmera reabrir antes de disparar
             worker.postDelayed({ dispatchRawCapture(ctx, characteristics, rw, rh) }, 800L)
             return
         }
@@ -417,7 +398,6 @@ class Camera2Controller {
             val device  = cam2?.let { getCameraDevice(it) }
             val handler = cam2?.let { getCameraHandler(it) }
 
-            // Obtém a surface do imageReader registrado na lib via reflexão
             val rawSurface: Surface? = runCatching {
                 val f = Camera2ApiManager::class.java.getDeclaredField("imageReader")
                     .also { it.isAccessible = true }
@@ -429,7 +409,6 @@ class Camera2Controller {
                 runCatching {
                     val stillBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
 
-                    // Propaga parâmetros do preview (ISO, WB, zoom, AF, etc.)
                     cam2.let { getBuilderInputSurface(it) }?.build()?.let { previewReq ->
                         for (key in previewReq.keys) {
                             @Suppress("UNCHECKED_CAST")
@@ -445,8 +424,6 @@ class Camera2Controller {
                     stillBuilder.addTarget(rawSurface)
 
                     val captureCallback = object : CameraCaptureSession.CaptureCallback() {
-                        // Imagem ainda não disponível aqui — chega via addImageListener
-                        // Apenas registramos o result para o rawManager parear
                         override fun onCaptureCompleted(
                             session: CameraCaptureSession,
                             request: CaptureRequest,
