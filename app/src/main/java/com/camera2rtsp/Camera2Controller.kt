@@ -12,6 +12,7 @@ import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.media.Image
+import android.media.ImageReader
 import android.os.Build
 import android.os.Environment
 import android.os.Handler
@@ -26,8 +27,6 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 class Camera2Controller {
@@ -72,16 +71,15 @@ class Camera2Controller {
     var yuvProcessor: YuvFrameProcessor? = null
     var yuvFrameCallback: ((YuvFrame) -> Unit)? = null
 
-    var rawCaptureEnabled = false
-    var rawManager: RawCaptureManager? = null
-    var rawFrameCallback: ((RawCaptureManager.RawFrame) -> Unit)? = null
+    // RAW capture — ImageReader próprio, fora da lib RootEncoder
+    private var rawManager: RawCaptureManager? = null
+    private var rawFrameCallback: ((RawCaptureManager.RawFrame) -> Unit)? = null
+    private var rawImageReader: ImageReader? = null
+    private val rawReaderThread = HandlerThread("RawReaderThread").also { it.start() }
+    private val rawReaderHandler = Handler(rawReaderThread.looper)
 
-    private val rawCapturePending = AtomicBoolean(false)
-
-    // Fila de Images abertas aguardando o TotalCaptureResult.
-    // O hardware entrega a Image ANTES do onCaptureCompleted,
-    // por isso guardamos a Image aqui e o result a drena.
-    private val pendingImageQueue = LinkedBlockingQueue<Image>(4)
+    // TotalCaptureResult do one-shot, guardado para o onImageAvailable pegar
+    @Volatile private var pendingCaptureResult: TotalCaptureResult? = null
 
     @Volatile var lastRawDngBytes: ByteArray? = null
     @Volatile var lastRawFilename: String = ""
@@ -218,7 +216,6 @@ class Camera2Controller {
                     CaptureResult.CONTROL_AE_STATE_FLASH_REQUIRED -> "flash_required"
                     else                                           -> "idle"
                 }
-                // liveMonitor NAO interfere com one-shot RAW capture
             }
             Log.i(tag, "[liveMonitor] callback registrado com sucesso")
         }.onFailure { Log.w(tag, "[liveMonitor] falhou: ${it.message}") }
@@ -278,122 +275,34 @@ class Camera2Controller {
         Log.i(tag, "disableYuvProcessor ok")
     }
 
-    /**
-     * Drena e fecha todas as Images presas em pendingImageQueue.
-     * Deve ser chamado em onCaptureFailed, releaseRawManager e disableRawCapture.
-     */
-    private fun drainPendingImages() {
-        var img = pendingImageQueue.poll()
-        while (img != null) {
-            runCatching { img!!.close() }
-            Log.w(tag, "drainPendingImages: Image descartada (sem result par)")
-            img = pendingImageQueue.poll()
-        }
-    }
+    // -------------------------------------------------------------------------
+    // RAW Capture — ImageReader próprio, completamente fora da lib RootEncoder
+    // -------------------------------------------------------------------------
 
     /**
-     * Habilita captura RAW usando addImageListener() da lib.
-     *
-     * Fluxo corrigido — a Image chega ANTES do TotalCaptureResult:
-     *  onImageAvailable  -> pendingImageQueue.offer(image)   (Image aberta, sem cópia)
-     *  onCaptureCompleted -> val img = pendingImageQueue.poll(500ms)
-     *                        rawManager?.processImage(img, result)
-     *
-     * Após processImage, onRawFrame é invocado com o RawFrame pronto:
-     *  - atribui lastRawDngBytes e lastRawFilename (usado por serveRawResult)
-     *  - chama saveToMediaStore para gravar DNG no DCIM/CAMSTREAMER
+     * Fecha e libera o rawImageReader atual, se existir.
      */
-    fun enableRawCapture(width: Int, height: Int, callback: ((RawCaptureManager.RawFrame) -> Unit)? = null): Boolean {
-        val ctx = appContext ?: return false
-        val caps = discoverAllCameras(ctx).firstOrNull { it.cameraId == currentCameraId } ?: return false
-        if (!caps.isRawCaptureFeasible()) {
-            Log.w(tag, "enableRawCapture: camera $currentCameraId sem suporte RAW viavel")
-            return false
-        }
-        val cam2 = getCam2Manager() ?: run {
-            Log.e(tag, "enableRawCapture: cam2manager nulo")
-            return false
-        }
-        val mgrSvc = ctx.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-        val characteristics = runCatching {
-            mgrSvc.getCameraCharacteristics(currentCameraId)
-        }.getOrElse {
-            Log.e(tag, "enableRawCapture: nao obteve CameraCharacteristics", it)
-            return false
-        }
-
-        releaseRawManager()
-        rawFrameCallback = callback
-
-        rawManager = RawCaptureManager(
-            width, height, characteristics,
-            onRawFrame = { frame ->
-                // fix: preenche lastRawDngBytes/lastRawFilename para que
-                // serveRawResult possa servir o download via polling.
-                // Também salva o DNG no DCIM/CAMSTREAMER do dispositivo.
-                if (frame.dngBytes.isNotEmpty()) {
-                    val fn = "RAW_${System.currentTimeMillis()}.dng"
-                    lastRawDngBytes = frame.dngBytes
-                    lastRawFilename = fn
-                    appContext?.let { saveToMediaStore(it, frame.dngBytes, fn) }
-                    Log.i(tag, "onRawFrame: DNG pronto — ${frame.dngBytes.size / 1024} KB, arquivo=$fn")
-                } else {
-                    Log.w(tag, "onRawFrame: dngBytes vazio, captura ignorada")
-                }
-                rawFrameCallback?.invoke(frame)
-            },
-            onResultConsumed = { rawCapturePending.set(false) }
-        )
-
-        runCatching {
-            cam2.addImageListener(
-                width, height,
-                ImageFormat.RAW_SENSOR,
-                /* maxImages = */ 4,
-                /* autoClose = */ false,
-                object : Camera2ApiManager.ImageCallback {
-                    override fun onImageAvailable(image: Image) {
-                        if (rawCapturePending.get()) {
-                            val offered = pendingImageQueue.offer(image)
-                            if (!offered) {
-                                Log.w(tag, "onImageAvailable: fila cheia, descartando Image")
-                                runCatching { image.close() }
-                            } else {
-                                Log.d(tag, "onImageAvailable: Image enfileirada, aguardando result")
-                            }
-                        } else {
-                            Log.d(tag, "onImageAvailable: sem captura pendente, descartando Image")
-                            runCatching { image.close() }
-                        }
-                    }
-                }
-            )
-            Log.i(tag, "enableRawCapture: addImageListener ok ${width}x${height}")
-        }.onFailure {
-            Log.e(tag, "enableRawCapture: addImageListener falhou", it)
-            releaseRawManager()
-            return false
-        }
-
-        rawCaptureEnabled = true
-        initLiveMonitorDelayed(600L)
-        Log.i(tag, "enableRawCapture ok ${width}x${height}")
-        return true
+    private fun closeRawImageReader() {
+        runCatching { rawImageReader?.close() }
+            .onFailure { Log.e(tag, "closeRawImageReader falhou", it) }
+        rawImageReader = null
+        pendingCaptureResult = null
     }
 
-    fun disableRawCapture() {
-        val cam2 = getCam2Manager()
-        runCatching { cam2?.removeImageListener() }
-            .onFailure { Log.e(tag, "disableRawCapture: removeImageListener falhou", it) }
-        drainPendingImages()
-        releaseRawManager()
-        rawFrameCallback = null
-        rawCaptureEnabled = false
-        rawCapturePending.set(false)
-        initLiveMonitorDelayed(600L)
-        Log.i(tag, "disableRawCapture ok")
-    }
-
+    /**
+     * Dispara uma captura RAW one-shot.
+     *
+     * Fluxo:
+     *  1. Obtém resolução nativa do sensor (ex: 4032x3024)
+     *  2. Fecha ImageReader anterior se existir
+     *  3. Cria novo ImageReader(rw, rh, RAW_SENSOR, maxImages=2)
+     *  4. Cria RawCaptureManager se necessário
+     *  5. Pega session ativa via reflexão
+     *  6. stillBuilder.addTarget(rawImageReader!!.surface)
+     *  7. session.capture() one-shot:
+     *     - onCaptureCompleted → guarda result em pendingCaptureResult
+     *     - onImageAvailable   → lê pendingCaptureResult → processImage(image, result)
+     */
     fun captureRawStill(context: Context) {
         val ctx = appContext ?: context
         val caps = discoverAllCameras(ctx).firstOrNull { it.cameraId == currentCameraId }
@@ -415,120 +324,111 @@ class Camera2Controller {
         val rw = rawSize?.width  ?: currentWidth
         val rh = rawSize?.height ?: currentHeight
 
-        if (!rawCaptureEnabled || rawManager == null) {
-            Log.i(tag, "captureRawStill: rawCapture nao estava habilitado, habilitando agora")
-            val ok = enableRawCapture(rw, rh)
-            if (!ok) {
-                Log.e(tag, "captureRawStill: enableRawCapture falhou, abortando")
-                return
-            }
-            worker.postDelayed({ dispatchRawCapture(ctx, characteristics, rw, rh) }, 800L)
-            return
-        }
-
-        dispatchRawCapture(ctx, characteristics, rw, rh)
+        post { dispatchRawCapture(ctx, characteristics, rw, rh) }
     }
 
     private fun dispatchRawCapture(
         ctx: Context,
-        characteristics: android.hardware.camera2.CameraCharacteristics,
+        characteristics: CameraCharacteristics,
         rw: Int,
         rh: Int
     ) {
-        rawCapturePending.set(true)
-        Log.d(tag, "captureRawStill: rawCapturePending=true, disparando still")
-
-        post {
-            val cam2    = getCam2Manager()
-            val session = cam2?.let { getCaptureSession(it) }
-            val device  = cam2?.let { getCameraDevice(it) }
-            val handler = cam2?.let { getCameraHandler(it) }
-
-            val rawSurface: Surface? = runCatching {
-                val f = Camera2ApiManager::class.java.getDeclaredField("imageReader")
-                    .also { it.isAccessible = true }
-                (f.get(cam2) as? android.media.ImageReader)?.surface
-            }.onFailure { Log.w(tag, "captureRawStill: nao obteve imageReader surface via reflexao", it) }
-             .getOrNull()
-
-            if (session != null && device != null && rawSurface != null) {
-                runCatching {
-                    val stillBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
-
-                    cam2.let { getBuilderInputSurface(it) }?.build()?.let { previewReq ->
-                        for (key in previewReq.keys) {
-                            @Suppress("UNCHECKED_CAST")
-                            val k = key as CaptureRequest.Key<Any>
-                            previewReq.get(k)?.let { v -> runCatching { stillBuilder.set(k, v) } }
-                        }
+        // Garante RawCaptureManager inicializado
+        if (rawManager == null) {
+            rawManager = RawCaptureManager(
+                rw, rh, characteristics,
+                onRawFrame = { frame ->
+                    if (frame.dngBytes.isNotEmpty()) {
+                        val fn = "RAW_${System.currentTimeMillis()}.dng"
+                        lastRawDngBytes = frame.dngBytes
+                        lastRawFilename = fn
+                        appContext?.let { saveToMediaStore(it, frame.dngBytes, fn) }
+                        Log.i(tag, "onRawFrame: DNG pronto — ${frame.dngBytes.size / 1024} KB, arquivo=$fn")
+                    } else {
+                        Log.w(tag, "onRawFrame: dngBytes vazio, captura ignorada")
                     }
-
-                    stillBuilder.set(
-                        CaptureRequest.CONTROL_CAPTURE_INTENT,
-                        CameraMetadata.CONTROL_CAPTURE_INTENT_STILL_CAPTURE
-                    )
-                    stillBuilder.addTarget(rawSurface)
-
-                    val captureCallback = object : CameraCaptureSession.CaptureCallback() {
-                        override fun onCaptureCompleted(
-                            session: CameraCaptureSession,
-                            request: CaptureRequest,
-                            result: TotalCaptureResult
-                        ) {
-                            Log.d(tag, "captureRawStill one-shot onCaptureCompleted — aguardando Image da fila")
-                            val image = pendingImageQueue.poll(500, TimeUnit.MILLISECONDS)
-                            if (image != null) {
-                                Log.d(tag, "onCaptureCompleted: Image obtida da fila, chamando processImage")
-                                rawManager?.processImage(image, result)
-                            } else {
-                                rawCapturePending.set(false)
-                                Log.w(tag, "onCaptureCompleted: poll(500ms) expirou — Image nao chegou a tempo. Device lento?")
-                            }
-                        }
-
-                        override fun onCaptureFailed(
-                            session: CameraCaptureSession,
-                            request: CaptureRequest,
-                            failure: android.hardware.camera2.CaptureFailure
-                        ) {
-                            rawCapturePending.set(false)
-                            drainPendingImages()
-                            Log.e(tag, "captureRawStill one-shot onCaptureFailed reason=${failure.reason}")
-                        }
-                    }
-
-                    session.capture(stillBuilder.build(), captureCallback, handler)
-                    Log.d(tag, "captureRawStill disparo one-shot enviado via session.capture()")
-
-                }.onFailure { e ->
-                    rawCapturePending.set(false)
-                    drainPendingImages()
-                    Log.e(tag, "captureRawStill one-shot falhou — fallback setCustomRequest", e)
-                    runCatching {
-                        setCustomRequest { b ->
-                            b.set(CaptureRequest.CONTROL_CAPTURE_INTENT,
-                                CameraMetadata.CONTROL_CAPTURE_INTENT_STILL_CAPTURE)
-                        }
-                        rawCapturePending.set(true)
-                        Log.d(tag, "captureRawStill fallback disparo enviado")
-                    }.onFailure {
-                        rawCapturePending.set(false)
-                        Log.e(tag, "captureRawStill fallback tambem falhou", it)
-                    }
+                    rawFrameCallback?.invoke(frame)
                 }
+            )
+        }
+
+        // Fecha ImageReader anterior e cria um novo limpo
+        closeRawImageReader()
+        val reader = ImageReader.newInstance(rw, rh, ImageFormat.RAW_SENSOR, 2)
+        rawImageReader = reader
+
+        val cam2    = getCam2Manager()
+        val session = cam2?.let { getCaptureSession(it) }
+        val device  = cam2?.let { getCameraDevice(it) }
+        val handler = cam2?.let { getCameraHandler(it) }
+
+        if (session == null || device == null) {
+            Log.e(tag, "dispatchRawCapture: session=$session device=$device — abortando")
+            closeRawImageReader()
+            return
+        }
+
+        val captureCallback = object : CameraCaptureSession.CaptureCallback() {
+            override fun onCaptureCompleted(
+                session: CameraCaptureSession,
+                request: CaptureRequest,
+                result: TotalCaptureResult
+            ) {
+                Log.d(tag, "dispatchRawCapture: onCaptureCompleted — guardando result")
+                pendingCaptureResult = result
+            }
+
+            override fun onCaptureFailed(
+                session: CameraCaptureSession,
+                request: CaptureRequest,
+                failure: android.hardware.camera2.CaptureFailure
+            ) {
+                pendingCaptureResult = null
+                closeRawImageReader()
+                Log.e(tag, "dispatchRawCapture: onCaptureFailed reason=${failure.reason}")
+            }
+        }
+
+        reader.setOnImageAvailableListener({ imageReader ->
+            val image  = imageReader.acquireNextImage() ?: return@setOnImageAvailableListener
+            val result = pendingCaptureResult
+            if (result != null) {
+                pendingCaptureResult = null
+                Log.d(tag, "onImageAvailable: Image + result prontos, chamando processImage")
+                rawManager?.processImage(image, result)
+                // rawImageReader permanece aberto para próxima captura
             } else {
-                Log.w(tag, "captureRawStill: session=$session device=$device rawSurface=$rawSurface — fallback setCustomRequest")
-                runCatching {
-                    setCustomRequest { b ->
-                        b.set(CaptureRequest.CONTROL_CAPTURE_INTENT,
-                            CameraMetadata.CONTROL_CAPTURE_INTENT_STILL_CAPTURE)
-                    }
-                    Log.d(tag, "captureRawStill fallback disparo enviado")
-                }.onFailure {
-                    rawCapturePending.set(false)
-                    Log.e(tag, "captureRawStill disparo falhou — rawCapturePending resetado", it)
+                Log.w(tag, "onImageAvailable: result ainda nulo — aguardando onCaptureCompleted")
+                // Devolve a imagem sem processar; onCaptureCompleted ainda não chegou
+                // (raro: sensor mais rápido que o callback de metadados)
+                runCatching { image.close() }
+            }
+        }, rawReaderHandler)
+
+        runCatching {
+            val stillBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
+
+            cam2.let { getBuilderInputSurface(it) }?.build()?.let { previewReq ->
+                for (key in previewReq.keys) {
+                    @Suppress("UNCHECKED_CAST")
+                    val k = key as CaptureRequest.Key<Any>
+                    previewReq.get(k)?.let { v -> runCatching { stillBuilder.set(k, v) } }
                 }
             }
+
+            stillBuilder.set(
+                CaptureRequest.CONTROL_CAPTURE_INTENT,
+                CameraMetadata.CONTROL_CAPTURE_INTENT_STILL_CAPTURE
+            )
+            stillBuilder.addTarget(reader.surface)
+
+            session.capture(stillBuilder.build(), captureCallback, handler)
+            Log.d(tag, "dispatchRawCapture: one-shot enviado via session.capture() ${rw}x${rh}")
+
+        }.onFailure { e ->
+            pendingCaptureResult = null
+            closeRawImageReader()
+            Log.e(tag, "dispatchRawCapture: session.capture falhou", e)
         }
     }
 
@@ -599,8 +499,7 @@ class Camera2Controller {
     }
 
     private fun releaseRawManager() {
-        rawCapturePending.set(false)
-        drainPendingImages()
+        closeRawImageReader()
         runCatching { rawManager?.release() }
             .onFailure { Log.e(tag, "releaseRawManager falhou", it) }
         rawManager = null
@@ -782,17 +681,6 @@ class Camera2Controller {
             if (enabled) enableYuvProcessor(currentWidth, currentHeight)
             else disableYuvProcessor()
             Log.d(tag, "yuvCapture -> $enabled")
-        }
-
-        params["rawCapture"]?.let { value ->
-            val enabled = when (value) {
-                is Boolean -> value
-                is Number -> value.toInt() != 0
-                else -> value.toString().equals("true", ignoreCase = true)
-            }
-            if (enabled) enableRawCapture(currentWidth, currentHeight)
-            else disableRawCapture()
-            Log.d(tag, "rawCapture -> $enabled")
         }
 
         params["depthFusion"]?.let { value ->
@@ -1105,6 +993,7 @@ class Camera2Controller {
     fun release() {
         releaseYuvProcessor()
         releaseRawManager()
+        rawReaderThread.quitSafely()
         releaseDepthProcessor()
         worker.removeCallbacks(postProcRunnable)
         workerThread.quitSafely()
