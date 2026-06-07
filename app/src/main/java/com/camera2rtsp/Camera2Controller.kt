@@ -27,6 +27,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 class Camera2Controller {
 
@@ -74,7 +75,8 @@ class Camera2Controller {
     var rawManager: RawCaptureManager? = null
     var rawFrameCallback: ((RawCaptureManager.RawFrame) -> Unit)? = null
 
-    private val rawCapturePending = AtomicBoolean(false)
+    private val rawCapturePending   = AtomicBoolean(false)
+    private val pendingCaptureResult = AtomicReference<TotalCaptureResult?>(null)
 
     @Volatile var lastRawDngBytes: ByteArray? = null
     @Volatile var lastRawFilename: String = ""
@@ -211,9 +213,7 @@ class Camera2Controller {
                     CaptureResult.CONTROL_AE_STATE_FLASH_REQUIRED -> "flash_required"
                     else                                           -> "idle"
                 }
-                if (rawCapturePending.get()) {
-                    rawManager?.offerResult(result)
-                }
+                // liveMonitor NAO interfere com one-shot RAW capture
             }
             Log.i(tag, "[liveMonitor] callback registrado com sucesso")
         }.onFailure { Log.w(tag, "[liveMonitor] falhou: ${it.message}") }
@@ -276,9 +276,10 @@ class Camera2Controller {
     /**
      * Habilita captura RAW usando addImageListener() da lib.
      *
-     * maxImages=4: margem extra para rajadas de frames RAW contínuos.
-     * O RawCaptureManager fecha a Image imediatamente no callback para
-     * liberar os slots antes que novos frames cheguem.
+     * O onImageAvailable verifica pendingCaptureResult:
+     *  - Se há um TotalCaptureResult pendente (one-shot): chama processImage(image, result)
+     *    mantendo a Image ABERTA para o DngCreator (sem cópia de ByteArray).
+     *  - Caso contrário: fallback para onImageAvailable legado.
      */
     fun enableRawCapture(width: Int, height: Int, callback: ((RawCaptureManager.RawFrame) -> Unit)? = null): Boolean {
         val ctx = appContext ?: return false
@@ -312,11 +313,19 @@ class Camera2Controller {
             cam2.addImageListener(
                 width, height,
                 ImageFormat.RAW_SENSOR,
-                /* maxImages = */ 4,   // aumentado de 2 para 4: margem contra rajadas RAW
+                /* maxImages = */ 4,
                 /* autoClose = */ false,
                 object : Camera2ApiManager.ImageCallback {
                     override fun onImageAvailable(image: Image) {
-                        rawManager?.onImageAvailable(image)
+                        val result = pendingCaptureResult.getAndSet(null)
+                        if (result != null) {
+                            // Caminho one-shot: Image permanece ABERTA para o DngCreator
+                            Log.d(tag, "onImageAvailable: result disponivel, chamando processImage")
+                            rawManager?.processImage(image, result)
+                        } else {
+                            // Fallback legado (não deveria ocorrer no fluxo normal)
+                            rawManager?.onImageAvailable(image)
+                        }
                     }
                 }
             )
@@ -341,6 +350,7 @@ class Camera2Controller {
         rawFrameCallback = null
         rawCaptureEnabled = false
         rawCapturePending.set(false)
+        pendingCaptureResult.set(null)
         initLiveMonitorDelayed(600L)
         Log.i(tag, "disableRawCapture ok")
     }
@@ -427,7 +437,8 @@ class Camera2Controller {
                             result: TotalCaptureResult
                         ) {
                             Log.d(tag, "captureRawStill one-shot onCaptureCompleted")
-                            rawManager?.offerResult(result)
+                            // Armazena o result para o onImageAvailable consumir junto com a Image
+                            pendingCaptureResult.set(result)
                         }
 
                         override fun onCaptureFailed(
@@ -436,6 +447,7 @@ class Camera2Controller {
                             failure: android.hardware.camera2.CaptureFailure
                         ) {
                             rawCapturePending.set(false)
+                            pendingCaptureResult.set(null)
                             Log.e(tag, "captureRawStill one-shot onCaptureFailed reason=${failure.reason}")
                         }
                     }
@@ -445,6 +457,7 @@ class Camera2Controller {
 
                 }.onFailure { e ->
                     rawCapturePending.set(false)
+                    pendingCaptureResult.set(null)
                     Log.e(tag, "captureRawStill one-shot falhou — fallback setCustomRequest", e)
                     runCatching {
                         setCustomRequest { b ->
@@ -542,6 +555,7 @@ class Camera2Controller {
 
     private fun releaseRawManager() {
         rawCapturePending.set(false)
+        pendingCaptureResult.set(null)
         runCatching { rawManager?.release() }
             .onFailure { Log.e(tag, "releaseRawManager falhou", it) }
         rawManager = null
