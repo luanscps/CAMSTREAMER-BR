@@ -172,7 +172,6 @@ object WebControlApi {
 
     /**
      * POST /api/raw/capture
-     * Bug #2 fix: nao bloqueia a thread do NanoHTTPD.
      * Dispara captureRawStill() e retorna 202 imediatamente.
      * O app.js faz polling em GET /api/raw/result?poll=1 para saber quando ficou pronto.
      */
@@ -185,7 +184,6 @@ object WebControlApi {
             cameraController.lastRawDngBytes = null
             cameraController.lastRawFilename = ""
 
-            // Dispara assincronamente — retorna antes da captura terminar
             cameraController.captureRawStill(context)
 
             Log.i("WebControlApi", "handleRawCapture: disparo enviado, retornando 202")
@@ -207,8 +205,9 @@ object WebControlApi {
 
     /**
      * GET /api/raw/result
-     * Com ?poll=1: retorna JSON {ready, filename, size_kb} — sem baixar o arquivo.
+     * Com ?poll=1: retorna JSON {ready, filename, size_kb}.
      * Sem ?poll=1: retorna o DNG binario para download se pronto, 404 se nao.
+     * Apos servir o download, zera lastRawDngBytes para evitar entregar foto velha.
      */
     fun serveRawResult(
         session: IHTTPSession,
@@ -220,9 +219,10 @@ object WebControlApi {
 
         if (isPoll) {
             val ready = dngBytes != null && dngBytes.isNotEmpty()
-            // Após o if acima, o smart cast garante dngBytes: ByteArray (nao-nulo) dentro do bloco
-            val sizeKb = if (ready) dngBytes.size / 1024 else 0
-            return okJson("""{"ready":$ready,"filename":"$filename","size_kb":$sizeKb}""")
+            val sizeKb = if (ready) dngBytes!!.size / 1024 else 0
+            val resp = okJson("""{"ready":$ready,"filename":"$filename","size_kb":$sizeKb}""")
+            resp.addHeader("Access-Control-Allow-Origin", "*")
+            return resp
         }
 
         if (dngBytes == null || dngBytes.isEmpty()) {
@@ -235,6 +235,12 @@ object WebControlApi {
         }
 
         val safeFilename = if (filename.isNotBlank()) filename else "raw_capture.dng"
+
+        // fix: zera apos servir o download para evitar entregar DNG antigo em nova captura
+        cameraController.lastRawDngBytes = null
+        cameraController.lastRawFilename = ""
+        Log.i("WebControlApi", "serveRawResult: DNG servido e cache zerado ($safeFilename)")
+
         val resp = NanoHTTPD.newFixedLengthResponse(
             Response.Status.OK,
             "image/x-adobe-dng",

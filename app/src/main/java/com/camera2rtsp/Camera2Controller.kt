@@ -295,9 +295,13 @@ class Camera2Controller {
      * Habilita captura RAW usando addImageListener() da lib.
      *
      * Fluxo corrigido — a Image chega ANTES do TotalCaptureResult:
-     *  onImageAvailable  → pendingImageQueue.offer(image)   (Image aberta, sem cópia)
-     *  onCaptureCompleted → val img = pendingImageQueue.poll(500ms)
-     *                       rawManager?.processImage(img, result)
+     *  onImageAvailable  -> pendingImageQueue.offer(image)   (Image aberta, sem cópia)
+     *  onCaptureCompleted -> val img = pendingImageQueue.poll(500ms)
+     *                        rawManager?.processImage(img, result)
+     *
+     * Após processImage, onRawFrame é invocado com o RawFrame pronto:
+     *  - atribui lastRawDngBytes e lastRawFilename (usado por serveRawResult)
+     *  - chama saveToMediaStore para gravar DNG no DCIM/CAMSTREAMER
      */
     fun enableRawCapture(width: Int, height: Int, callback: ((RawCaptureManager.RawFrame) -> Unit)? = null): Boolean {
         val ctx = appContext ?: return false
@@ -323,7 +327,21 @@ class Camera2Controller {
 
         rawManager = RawCaptureManager(
             width, height, characteristics,
-            onRawFrame = { frame -> rawFrameCallback?.invoke(frame) },
+            onRawFrame = { frame ->
+                // fix: preenche lastRawDngBytes/lastRawFilename para que
+                // serveRawResult possa servir o download via polling.
+                // Também salva o DNG no DCIM/CAMSTREAMER do dispositivo.
+                if (frame.dngBytes.isNotEmpty()) {
+                    val fn = "RAW_${System.currentTimeMillis()}.dng"
+                    lastRawDngBytes = frame.dngBytes
+                    lastRawFilename = fn
+                    appContext?.let { saveToMediaStore(it, frame.dngBytes, fn) }
+                    Log.i(tag, "onRawFrame: DNG pronto — ${frame.dngBytes.size / 1024} KB, arquivo=$fn")
+                } else {
+                    Log.w(tag, "onRawFrame: dngBytes vazio, captura ignorada")
+                }
+                rawFrameCallback?.invoke(frame)
+            },
             onResultConsumed = { rawCapturePending.set(false) }
         )
 
@@ -335,7 +353,6 @@ class Camera2Controller {
                 /* autoClose = */ false,
                 object : Camera2ApiManager.ImageCallback {
                     override fun onImageAvailable(image: Image) {
-                        // Image chega ANTES do TotalCaptureResult — guarda na fila aberta
                         if (rawCapturePending.get()) {
                             val offered = pendingImageQueue.offer(image)
                             if (!offered) {
@@ -345,7 +362,6 @@ class Camera2Controller {
                                 Log.d(tag, "onImageAvailable: Image enfileirada, aguardando result")
                             }
                         } else {
-                            // Nenhuma captura one-shot pendente — descarta
                             Log.d(tag, "onImageAvailable: sem captura pendente, descartando Image")
                             runCatching { image.close() }
                         }
@@ -460,14 +476,13 @@ class Camera2Controller {
                             result: TotalCaptureResult
                         ) {
                             Log.d(tag, "captureRawStill one-shot onCaptureCompleted — aguardando Image da fila")
-                            // TotalCaptureResult chegou: drena a Image que já está na fila
                             val image = pendingImageQueue.poll(500, TimeUnit.MILLISECONDS)
                             if (image != null) {
                                 Log.d(tag, "onCaptureCompleted: Image obtida da fila, chamando processImage")
                                 rawManager?.processImage(image, result)
                             } else {
                                 rawCapturePending.set(false)
-                                Log.e(tag, "onCaptureCompleted: timeout aguardando Image na fila — captura descartada")
+                                Log.w(tag, "onCaptureCompleted: poll(500ms) expirou — Image nao chegou a tempo. Device lento?")
                             }
                         }
 
