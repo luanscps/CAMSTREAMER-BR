@@ -1,5 +1,6 @@
 package com.camera2rtsp
 
+import android.annotation.SuppressLint
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.ImageFormat
@@ -75,10 +76,18 @@ class Camera2Controller {
     // RAW capture
     private var rawManager: RawCaptureManager? = null
     private var rawFrameCallback: ((RawCaptureManager.RawFrame) -> Unit)? = null
+
+    // fix: thread dedicada EXCLUSIVAMENTE para o ImageReader de captura RAW
+    // separada do rawReaderHandler para evitar deadlock com onCaptureCompleted
     private val rawReaderThread = HandlerThread("RawReaderThread").also { it.start() }
     private val rawReaderHandler = Handler(rawReaderThread.looper)
 
-    // fix: pendingCaptureResult substituído por AtomicReference para thread-safety real
+    // fix: thread separada para callbacks de CaptureSession (onCaptureCompleted)
+    // evita que o busy-wait em onImageAvailable bloqueie esta thread
+    private val rawImageThread = HandlerThread("RawImageThread").also { it.start() }
+    private val rawImageHandler = Handler(rawImageThread.looper)
+
+    // fix: AtomicReference para sincronização real entre onCaptureCompleted e onImageAvailable
     private val pendingCaptureResultRef = java.util.concurrent.atomic.AtomicReference<TotalCaptureResult?>(null)
 
     @Volatile var lastRawDngBytes: ByteArray? = null
@@ -190,7 +199,6 @@ class Camera2Controller {
             Log.w(tag, "[liveMonitor] getCam2Manager nulo - abortando")
             return
         }
-        // fix: verifica se a sessão já está aberta antes de registrar o callback
         val session = getCaptureSession(cam2mgr)
         if (session == null) {
             Log.w(tag, "[liveMonitor] sessão ainda não aberta - reagendando em 500ms")
@@ -300,6 +308,14 @@ class Camera2Controller {
      */
     fun captureRawStill(context: Context) {
         val ctx = appContext ?: context
+
+        // fix: verificar permissão CAMERA antes de tentar abrir a câmera
+        if (ctx.checkSelfPermission(android.Manifest.permission.CAMERA)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            Log.e(tag, "captureRawStill: permissão CAMERA negada — abortando")
+            return
+        }
+
         val caps = CameraCapabilitiesReader.read(ctx, currentCameraId)
         if (caps == null || !caps.isRawCaptureFeasible()) {
             Log.w(tag, "captureRawStill: camera $currentCameraId nao suporta RAW")
@@ -312,12 +328,20 @@ class Camera2Controller {
             Log.e(tag, "captureRawStill: CameraCharacteristics falhou", it)
             return
         }
+
+        // fix: se rawSize for null, abortar em vez de usar resolução de vídeo inválida
         val rawSize = characteristics
             .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
             ?.getOutputSizes(ImageFormat.RAW_SENSOR)
             ?.maxByOrNull { it.width * it.height }
-        val rw = rawSize?.width  ?: currentWidth
-        val rh = rawSize?.height ?: currentHeight
+
+        if (rawSize == null) {
+            Log.e(tag, "captureRawStill: getOutputSizes(RAW_SENSOR) retornou null — câmera não suporta RAW_SENSOR, abortando")
+            return
+        }
+
+        val rw = rawSize.width
+        val rh = rawSize.height
 
         post { dispatchRawCapture(ctx, mgrSvc, characteristics, rw, rh) }
     }
@@ -326,6 +350,7 @@ class Camera2Controller {
      * Executa a captura RAW com sessão dedicada.
      * Roda no worker thread.
      */
+    @SuppressLint("MissingPermission")
     private fun dispatchRawCapture(
         ctx: Context,
         cameraManager: CameraManager,
@@ -335,6 +360,8 @@ class Camera2Controller {
     ) {
         // fix: sempre recria o rawManager para garantir estado limpo a cada captura
         releaseRawManager()
+        val captureLatch = java.util.concurrent.CountDownLatch(1)
+
         rawManager = RawCaptureManager(
             rw, rh, characteristics,
             onRawFrame = { frame ->
@@ -348,6 +375,8 @@ class Camera2Controller {
                     Log.w(tag, "onRawFrame: dngBytes vazio, captura ignorada")
                 }
                 rawFrameCallback?.invoke(frame)
+                // fix: countDown AQUI — somente após DNG gerado pelo RawCaptureManager
+                captureLatch.countDown()
             }
         )
 
@@ -357,7 +386,6 @@ class Camera2Controller {
         if (wasStreaming) {
             Log.i(tag, "dispatchRawCapture: pausando stream para captura RAW")
             svc?.stopStream()
-            // fix: aguarda até 2s pelo fechamento real da sessão em vez de sleep fixo
             val stopLatch = java.util.concurrent.CountDownLatch(1)
             worker.postDelayed({ stopLatch.countDown() }, 600)
             stopLatch.await(2, java.util.concurrent.TimeUnit.SECONDS)
@@ -387,10 +415,12 @@ class Camera2Controller {
                         Log.e(tag, "dispatchRawCapture: openCamera error=$error")
                     }
                 },
-                rawReaderHandler
+                // fix: usa rawImageHandler (thread separada) para o StateCallback da câmera
+                rawImageHandler
             )
             if (!openLatch.await(4, java.util.concurrent.TimeUnit.SECONDS) || rawDevice == null) {
                 Log.e(tag, "dispatchRawCapture: openCamera timeout ou falhou")
+                captureLatch.countDown()
                 return
             }
 
@@ -408,35 +438,39 @@ class Camera2Controller {
                         sessionLatch.countDown()
                     }
                 },
-                rawReaderHandler
+                rawImageHandler
             )
             if (!sessionLatch.await(4, java.util.concurrent.TimeUnit.SECONDS) || rawSession == null) {
                 Log.e(tag, "dispatchRawCapture: createCaptureSession timeout ou falhou")
+                captureLatch.countDown()
                 return
             }
 
             // --- 4. Dispara one-shot STILL_CAPTURE ---
-            // fix: usa AtomicReference para sincronização real entre onCaptureCompleted e onImageAvailable
             pendingCaptureResultRef.set(null)
-            val captureLatch = java.util.concurrent.CountDownLatch(1)
 
+            // fix: onImageAvailable usa rawReaderHandler (thread exclusiva do ImageReader)
+            // evita que o busy-wait bloqueie o rawImageHandler usado pelo onCaptureCompleted
             rawReader.setOnImageAvailableListener({ imageReader ->
-                val image = imageReader.acquireNextImage() ?: return@setOnImageAvailableListener
-                try {
-                    // fix: aguarda até 3s pelo TotalCaptureResult antes de descartar
-                    val deadline = System.currentTimeMillis() + 3000L
-                    var result: TotalCaptureResult? = null
-                    while (result == null && System.currentTimeMillis() < deadline) {
-                        result = pendingCaptureResultRef.getAndSet(null)
-                        if (result == null) Thread.sleep(20)
-                    }
-                    if (result != null) {
-                        Log.d(tag, "onImageAvailable: processando DNG ${rw}x${rh}")
-                        rawManager?.processImage(image, result)
-                    } else {
-                        Log.w(tag, "onImageAvailable: TotalCaptureResult timeout (3s) — descartando frame")
-                    }
-                } finally {
+                val image = imageReader.acquireNextImage() ?: run {
+                    Log.w(tag, "onImageAvailable: acquireNextImage retornou null")
+                    captureLatch.countDown()
+                    return@setOnImageAvailableListener
+                }
+                // fix: Image NÃO é fechada aqui — RawCaptureManager.processImage()
+                // fecha no finally do rawHandler.post{} após DngCreator terminar.
+                // captureLatch.countDown() também ocorre lá via onRawFrame callback.
+                val deadline = System.currentTimeMillis() + 3000L
+                var result: TotalCaptureResult? = null
+                while (result == null && System.currentTimeMillis() < deadline) {
+                    result = pendingCaptureResultRef.getAndSet(null)
+                    if (result == null) Thread.sleep(20)
+                }
+                if (result != null) {
+                    Log.d(tag, "onImageAvailable: processando DNG ${rw}x${rh}")
+                    rawManager?.processImage(image, result)
+                } else {
+                    Log.w(tag, "onImageAvailable: TotalCaptureResult timeout (3s) — descartando frame")
                     runCatching { image.close() }
                     captureLatch.countDown()
                 }
@@ -449,6 +483,8 @@ class Camera2Controller {
                 CameraMetadata.CONTROL_CAPTURE_INTENT_STILL_CAPTURE
             )
 
+            // fix: onCaptureCompleted usa rawImageHandler (thread separada do rawReaderHandler)
+            // evita deadlock entre o busy-wait do onImageAvailable e o set() do result
             rawSession!!.capture(
                 stillBuilder.build(),
                 object : CameraCaptureSession.CaptureCallback() {
@@ -458,7 +494,6 @@ class Camera2Controller {
                         result: TotalCaptureResult
                     ) {
                         Log.d(tag, "dispatchRawCapture: onCaptureCompleted")
-                        // fix: seta via AtomicReference — thread-safe
                         pendingCaptureResultRef.set(result)
                     }
                     override fun onCaptureFailed(
@@ -470,12 +505,12 @@ class Camera2Controller {
                         captureLatch.countDown()
                     }
                 },
-                rawReaderHandler
+                rawImageHandler
             )
             Log.i(tag, "dispatchRawCapture: one-shot enviado ${rw}x${rh}")
 
-            // Aguarda imagem disponível (máx 8s para sensor RAW)
-            captureLatch.await(8, java.util.concurrent.TimeUnit.SECONDS)
+            // Aguarda DNG gerado (máx 12s — inclui tempo do DngCreator ~800ms)
+            captureLatch.await(12, java.util.concurrent.TimeUnit.SECONDS)
 
         } catch (e: Exception) {
             Log.e(tag, "dispatchRawCapture: falhou", e)
@@ -488,9 +523,13 @@ class Camera2Controller {
             Log.i(tag, "dispatchRawCapture: sessão RAW fechada")
 
             // --- 6. Retoma o stream ---
+            // fix: reinicia preview antes de startStream() — a sessão RAW dedicada
+            // fecha o preview do RtmpCamera2; startStream() sem preview falhava silenciosamente
             if (wasStreaming) {
                 Thread.sleep(300)
-                Log.i(tag, "dispatchRawCapture: retomando stream")
+                Log.i(tag, "dispatchRawCapture: retomando preview + stream")
+                svc?.startPreview()
+                Thread.sleep(200)
                 svc?.startStream()
             }
         }
@@ -703,8 +742,6 @@ class Camera2Controller {
             val ok = setCustomRequest { b ->
                 b.set(CaptureRequest.CONTROL_AWB_LOCK, lock)
             }
-            // fix: removido disableAutoWhiteBalance() duplicado no path de lock
-            // Apenas no unlock, garante que AWB volta ao automático
             if (!lock) {
                 if (!ok) {
                     runCatching { cam.enableAutoWhiteBalance(CameraMetadata.CONTROL_AWB_MODE_AUTO) }
@@ -765,7 +802,6 @@ class Camera2Controller {
             if (manualSensor) {
                 applyManualSensor()
             } else {
-                // fix: reseta frameDurationNs ao sair do modo manual para evitar valor stale
                 frameDurationNs = 33_333_333L
                 applyAutoSensor(cam)
                 cam.setExposure(0)
@@ -849,15 +885,12 @@ class Camera2Controller {
             Log.d(tag, "focusMode -> $it")
         }
 
-        // fix: afTrigger envia TRIGGER_START seguido de TRIGGER_IDLE no próximo frame
-        // para evitar que o trigger fique "preso" e degrade o AF contínuo
         params["afTrigger"]?.let {
             post {
                 val okStart = setCustomRequest { b ->
                     b.set(CaptureRequest.CONTROL_AF_TRIGGER, CameraMetadata.CONTROL_AF_TRIGGER_START)
                 }
                 Log.d(tag, "afTrigger START ok=$okStart")
-                // reset imediato para IDLE no próximo frame
                 worker.postDelayed({
                     setCustomRequest { b ->
                         b.set(CaptureRequest.CONTROL_AF_TRIGGER, CameraMetadata.CONTROL_AF_TRIGGER_IDLE)
@@ -985,7 +1018,6 @@ class Camera2Controller {
         params["rggbEnabled"]?.let {
             rggbEnabled = it as Boolean
             if (!rggbEnabled) {
-                // fix: zera gains para 1f antes de reativar AWB para evitar balanço residual
                 rggbGains = floatArrayOf(1f, 1f, 1f, 1f)
                 post {
                     runCatching {
@@ -1008,7 +1040,6 @@ class Camera2Controller {
             applyRggbGains(cam)
         }
 
-        // fix: changeCamera → delega para StreamingService.switchCamera que já trata facing corretamente
         params["camera"]?.let { camIdAny ->
             val newCamId = camIdAny.toString()
             if (newCamId != currentCameraId) {
@@ -1060,8 +1091,6 @@ class Camera2Controller {
         else      -> default
     }
 
-    // fix: discoverAllCameras agora delega explicitamente para CameraCapabilitiesReader
-    // resolve o "Unresolved reference" quando chamado dentro de post {} lambdas
     fun discoverAllCameras(context: Context): List<CameraCapabilities> =
         CameraCapabilitiesReader.discoverAllCameras(context)
 
@@ -1071,5 +1100,7 @@ class Camera2Controller {
         releaseDepthProcessor()
         runCatching { workerThread.quitSafely() }
         runCatching { rawReaderThread.quitSafely() }
+        // fix: para a thread dedicada ao ImageReader RAW
+        runCatching { rawImageThread.quitSafely() }
     }
 }
