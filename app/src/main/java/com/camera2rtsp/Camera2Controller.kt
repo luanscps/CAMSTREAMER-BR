@@ -276,12 +276,9 @@ class Camera2Controller {
     /**
      * Habilita captura RAW usando addImageListener() da lib.
      *
-     * A lib fecha e reabre a câmera incluindo o ImageReader RAW na
-     * CameraCaptureSession — resolve o IllegalArgumentException
-     * 'unconfigured Surface' que ocorria no session.capture().
-     *
-     * Usa object : Camera2ApiManager.ImageCallback para evitar ambiguidade
-     * de tipo na interoperação Java/Kotlin com SAM conversion.
+     * maxImages=4: margem extra para rajadas de frames RAW contínuos.
+     * O RawCaptureManager fecha a Image imediatamente no callback para
+     * liberar os slots antes que novos frames cheguem.
      */
     fun enableRawCapture(width: Int, height: Int, callback: ((RawCaptureManager.RawFrame) -> Unit)? = null): Boolean {
         val ctx = appContext ?: return false
@@ -315,7 +312,7 @@ class Camera2Controller {
             cam2.addImageListener(
                 width, height,
                 ImageFormat.RAW_SENSOR,
-                /* maxImages = */ 2,
+                /* maxImages = */ 4,   // aumentado de 2 para 4: margem contra rajadas RAW
                 /* autoClose = */ false,
                 object : Camera2ApiManager.ImageCallback {
                     override fun onImageAvailable(image: Image) {
