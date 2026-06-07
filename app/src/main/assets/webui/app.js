@@ -44,8 +44,9 @@ function updateOISCapability(hasOIS){var chk=document.getElementById('toggle-ois
 function buildCameraButtons(cameras,currentId){var c=document.getElementById('btngroup-camera');if(!c)return;var html='';for(var i=0;i<cameras.length;i++){var cam=cameras[i];if(cam.is_depth)continue;var lbl=cam.name||('Cam '+cam.camera_id);var active=(String(cam.camera_id)===String(currentId));html+='<button data-cam="'+cam.camera_id+'"'+(active?' class="active"':'')+' onclick="switchCamera(\''+cam.camera_id+'\',this)">'+lbl+'</button>'}c.innerHTML=html||'<span style="color:var(--muted)">Nenhuma câmera de vídeo disponível</span>'}
 function switchCamera(camId,btn){_currentCamId=camId;sendControl({camera:camId},btn,'Câmera '+camId);markActive('data-cam',camId);applyCameraCapabilities(camId)}
 
-// buildResolutionButtons — backend já entrega lista filtrada (máx 3 itens: 4K/1080p/720p)
-// filterStreamRes() removida: lógica de tier está no CameraCapabilitiesReader.kt
+// buildResolutionButtons — usa streaming_resolutions (lista filtrada pelo backend)
+// available_resolutions = todas as resoluções brutas do sensor (não usar aqui)
+// streaming_resolutions = máx 3 itens 16:9: melhor 4K + melhor 1080p + melhor 720p
 function buildResolutionButtons(resolutions,currentRes){
   var c=document.getElementById('btngroup-resolution');
   if(!c)return;
@@ -203,7 +204,9 @@ function downloadRawDng(btn){
 function applyCameraCapabilities(camId){
   var cap=getCap(camId);
   if(!cap)return;
-  buildResolutionButtons(cap.available_resolutions||[],cap.current_resolution);
+  // streaming_resolutions = lista filtrada por CameraCapabilitiesReader (máx 3 itens 16:9)
+  // available_resolutions = todas as resoluções brutas do sensor (não usar para botões)
+  buildResolutionButtons(cap.streaming_resolutions||cap.available_resolutions||[],cap.current_resolution);
   buildFpsButtons(cap.fps_ranges||null,cap.current_fps);
   buildFocusModeButtons(cap.supported_af_modes||cap.af_modes||[],cap.current_af_mode);
   buildWBButtons(cap.supported_awb_modes||cap.awb_modes||[],cap.current_wb);
