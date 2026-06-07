@@ -1032,6 +1032,13 @@ class Camera2Controller {
             val resolutions = streamCfg?.getOutputSizes(android.graphics.ImageFormat.YUV_420_888)
                 ?.map { "${it.width}x${it.height}" }?.distinct()
                 ?.sortedByDescending { it.split("x").getOrNull(0)?.toIntOrNull() ?: 0 } ?: emptyList()
+
+            // Resolução nativa RAW_SENSOR (usada pelo card raw-capture na UI)
+            val rawResolution = streamCfg
+                ?.getOutputSizes(ImageFormat.RAW_SENSOR)
+                ?.maxByOrNull { it.width * it.height }
+                ?.let { "${it.width}x${it.height}" }
+
             val afModes = ch.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES)?.map {
                 when (it) {
                     CameraCharacteristics.CONTROL_AF_MODE_OFF                -> "off"
@@ -1153,6 +1160,7 @@ class Camera2Controller {
                 exposureTimeRange = expRange, evRange = evRange,
                 focusDistanceRange = focRange, zoomRange = zomRange,
                 fpsRanges = fpsRanges, availableResolutions = resolutions,
+                rawResolution = rawResolution,
                 supportedAfModes = afModes, supportedAeModes = aeModes,
                 supportedAwbModes = awbModes, supportedSceneModes = sceneModes,
                 supportedEffectModes = effectModes, hasFlash = hasFlash, hasOis = hasOis,
