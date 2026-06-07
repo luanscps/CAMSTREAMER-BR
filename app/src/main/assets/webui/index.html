@@ -90,12 +90,16 @@
       </div>
     </div>
 
-    <!-- Bloco RAW Still Capture -->
+    <!-- Bloco RAW Still Capture — visível somente se o sensor suporta RAW_SENSOR -->
     <div id="card-raw-capture" style="margin-top:14px;padding:12px;background:var(--card-bg,#1a1a1a);border-radius:8px;border:1px solid var(--border,#333)">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
         <div>
           <div style="font-size:13px;font-weight:600;color:var(--text)">📸 Captura RAW Still</div>
           <div style="font-size:11px;color:var(--muted);margin-top:2px">Salva DNG no DCIM do dispositivo e disponibiliza para download</div>
+          <!-- Resolução real do ImageReader RAW_SENSOR — preenchida por applyCameraCapabilities() -->
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">
+            Resolução do sensor: <span id="raw-res-label" style="color:var(--text);font-weight:500">-</span>
+          </div>
         </div>
         <button id="btn-capture-raw" onclick="captureRaw(this)" style="min-width:130px">
           📷 Capturar RAW
