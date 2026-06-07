@@ -19,6 +19,7 @@ data class CameraCapabilities(
     val zoomRange: List<Float>?,
     val fpsRanges: List<List<Int>>,
     val availableResolutions: List<String>,
+    val rawResolution: String?,          // tamanho real do ImageReader RAW_SENSOR; null se !supportsRaw
     val supportedAfModes: List<String>,
     val supportedAeModes: List<String>,
     val supportedAwbModes: List<String>,
@@ -48,9 +49,15 @@ data class CameraCapabilities(
         return Pair(res, fps)
     }
 
-    fun bestRawResolution(): String? = sensorPixelArraySize
-        ?.takeIf { it.size >= 2 }
-        ?.let { "${it[0]}x${it[1]}" }
+    /**
+     * Retorna a resolução real do ImageReader RAW_SENSOR.
+     * Usa rawResolution como fonte primária (lido de getOutputSizes(RAW_SENSOR)).
+     * Fallback para sensorPixelArraySize se rawResolution for null por algum motivo.
+     */
+    fun bestRawResolution(): String? = rawResolution
+        ?: sensorPixelArraySize
+            ?.takeIf { it.size >= 2 }
+            ?.let { "${it[0]}x${it[1]}" }
 
     // Bug #1 fix: supportsManualSensor removido — RAW_SENSOR nao exige
     // MANUAL_SENSOR capability. Devices LIMITED podem ter RAW sem manual sensor.

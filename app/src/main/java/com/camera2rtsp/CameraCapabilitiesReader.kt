@@ -1,6 +1,7 @@
 package com.camera2rtsp
 
 import android.content.Context
+import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraMetadata
@@ -104,19 +105,24 @@ object CameraCapabilitiesReader {
             val hasOis   = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION)
                 ?.contains(CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_ON) == true
 
-            val resolutions = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                ?.getOutputSizes(android.graphics.ImageFormat.JPEG)
-                ?.filter { it.width >= 640 }
-                ?.sortedByDescending { it.width * it.height }
-                ?.map { "${it.width}x${it.height}" } ?: emptyList()
+            val streamCfg = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+
+            // Resoluções de streaming: YUV_420_888 filtradas por tier 16:9
+            val yuvSizes = streamCfg?.getOutputSizes(ImageFormat.YUV_420_888) ?: emptyArray()
+            val resolutions = buildStreamingResolutions(yuvSizes)
+
+            // Resolução RAW real do sensor — tamanho que o ImageReader RAW_SENSOR aceita
+            val rawResolution: String? = if (supportsRaw) {
+                streamCfg?.getOutputSizes(ImageFormat.RAW_SENSOR)
+                    ?.maxByOrNull { it.width * it.height }
+                    ?.let { "${it.width}x${it.height}" }
+            } else null
 
             // ── campos extras ─────────────────────────────────────────────────
 
-            // Tamanho do array de pixels (ex: Size(4000, 3000) → 12 MP)
             val pixelArraySize = chars.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)
             val sensorPixelArraySize = pixelArraySize?.let { listOf(it.width, it.height) }
 
-            // Tamanho fisico do sensor em mm — android.util.SizeF, sem import explicito necessario
             val physicalSize = chars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
             val sensorPhysicalSize = physicalSize?.let { listOf(it.width, it.height) }
 
@@ -151,6 +157,7 @@ object CameraCapabilitiesReader {
                 zoomRange                    = listOf(1f, maxZoom),
                 fpsRanges                    = fpsRanges,
                 availableResolutions         = resolutions,
+                rawResolution                = rawResolution,
                 supportedAfModes             = afModes,
                 supportedAeModes             = aeModes,
                 supportedAwbModes            = awbModes,
@@ -172,6 +179,33 @@ object CameraCapabilitiesReader {
         } catch (e: Exception) {
             Log.e("CameraCapReader", "Erro ao ler caps id=$cameraId", e)
             null
+        }
+    }
+
+    /**
+     * Seleciona até 1 resolução por tier (4K/1080p/720p) priorizando aspecto 16:9.
+     * Aspecto 16:9 = largura/altura entre 1.70 e 1.82.
+     * Fallback: maior área do tier se não houver 16:9 disponível.
+     */
+    private fun buildStreamingResolutions(sizes: Array<Size>): List<String> {
+        data class Tier(val minH: Int, val maxH: Int)
+        val tiers = listOf(
+            Tier(2160, Int.MAX_VALUE), // 4K
+            Tier(1080, 2159),          // 1080p
+            Tier(720,  1079)           // 720p
+        )
+        return tiers.mapNotNull { tier ->
+            val candidates = sizes.filter { it.height in tier.minH..tier.maxH }
+            if (candidates.isEmpty()) return@mapNotNull null
+            val widescreen = candidates.filter {
+                val ratio = it.width.toFloat() / it.height
+                ratio in 1.70f..1.82f
+            }
+            val best = if (widescreen.isNotEmpty())
+                widescreen.maxByOrNull { it.width * it.height }
+            else
+                candidates.maxByOrNull { it.width * it.height }
+            best?.let { "${it.width}x${it.height}" }
         }
     }
 
@@ -201,11 +235,10 @@ object CameraCapabilitiesReader {
         CameraMetadata.CONTROL_AWB_MODE_DAYLIGHT         -> "daylight"
         CameraMetadata.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT  -> "cloudy"
         CameraMetadata.CONTROL_AWB_MODE_TWILIGHT         -> "twilight"
-        CameraMetadata.CONTROL_AWB_MODE_SHADE            -> "shade"
+        CameraMetamer.CONTROL_AWB_MODE_SHADE            -> "shade"
         else -> "auto"
     }
 
-    // 17 = CONTROL_SCENE_MODE_HIGH_SPEED_VIDEO (constante deprecada no Android 12+, valor literal usado diretamente)
     private fun sceneModeToStr(m: Int) = when (m) {
         CameraMetadata.CONTROL_SCENE_MODE_DISABLED        -> "disabled"
         CameraMetadata.CONTROL_SCENE_MODE_ACTION          -> "action"

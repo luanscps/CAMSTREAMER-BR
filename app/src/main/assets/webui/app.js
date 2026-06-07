@@ -3,8 +3,6 @@
 var ISO_LIST=[50,81,112,143,174,205,236,267,298,329,360,391,422,453,484,515,546,577,608,639,670,701,732,763,794,825,856,887,918,949,980,1011,1042,1073,1104,1135,1166,1197,1228,1259,1290,1321,1352,1383,1414,1445,1476,1507,1538,1569,1600,1631,1662,1693,1724,1755,1786,1817,1848,1879,1910,1941,1972,2003,2034,2065,2096,2127,2158,2189,2220,2251,2282,2313,2344,2375,2406,2437,2468,2499,2530,2561,2592,2623,2654,2685,2716,2747,2778,2809,2840,2871,2902,2933,2964,2995,3026,3057,3088,3119,3150,3200];
 var SHUTTER_STOPS=['1/24','1/30','1/50','1/60','1/100','1/250','1/500','1/1000','1/2000','1/4000','1/10000'];
 var FRAME_STOPS=['1/15','1/24','1/30','1/60'];
-var RES_LABELS={'7680x4320':'8K','3840x2160':'4K','4032x2268':'4K (4:3)','4608x2592':'4K UW','2560x1440':'2K','1920x1080':'1080p','1920x1440':'1080p 4:3','1280x720':'720p','960x540':'540p','854x480':'480p','640x360':'360p'};
-var RES_MIN_WIDTH=640;
 var _caps=null,_currentCamId='0',_isManual=false,_rggbEnabled=false,_toastTimer,_pollFail=0,_pollCtrl=null;
 var _brT,_zT,_fT,_iT,_eT,_shT,_frT,_rgT_R,_rgT_Gr,_rgT_Gb,_rgT_B;
 
@@ -21,8 +19,15 @@ function setToggleChecked(id,checked){var el=document.getElementById(id);if(el)e
 function setBadge(id,enabled){var el=document.getElementById(id);if(el)el.style.display=enabled?'flex':'none'}
 function formatShutter(ns){if(!ns||ns<=0)return '-';var s=ns/1e9;if(s>=1)return s.toFixed(2)+'s';return '1/'+Math.round(1/s)+'s'}
 function formatNs(ns){if(!ns||ns<=0)return '-';if(ns>1e9)return (ns/1e9).toFixed(3)+' s';if(ns>1e6)return (ns/1e6).toFixed(3)+' ms';return ns+' ns'}
-function resLabel(res){if(RES_LABELS[res])return RES_LABELS[res]+'\n'+res;var p=res.split('x');if(p.length===2){var h=parseInt(p[1]);if(h>=2160)return '4K\n'+res;if(h>=1440)return '2K\n'+res;if(h>=1080)return '1080p\n'+res;if(h>=720)return '720p\n'+res;if(h>=540)return '540p\n'+res;if(h>=480)return '480p\n'+res}return res}
-function filterStreamRes(resolutions){return (resolutions||[]).filter(function(r){var p=r.split('x');return p.length===2&&parseInt(p[0])>=RES_MIN_WIDTH})}
+
+// resLabel: exibe tier + resolução real (ex: '4K · 3840x2160')
+function resLabel(res){
+  var p=res.split('x');
+  if(p.length!==2)return res;
+  var h=parseInt(p[1]);
+  var tier=h>=2160?'4K':h>=1080?'1080p':h>=720?'720p':h>=480?'480p':null;
+  return tier?(tier+'\n'+res):res;
+}
 
 function sendControl(data,btn,msg){
   fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
@@ -38,7 +43,22 @@ function updateOISCapability(hasOIS){var chk=document.getElementById('toggle-ois
 
 function buildCameraButtons(cameras,currentId){var c=document.getElementById('btngroup-camera');if(!c)return;var html='';for(var i=0;i<cameras.length;i++){var cam=cameras[i];if(cam.is_depth)continue;var lbl=cam.name||('Cam '+cam.camera_id);var active=(String(cam.camera_id)===String(currentId));html+='<button data-cam="'+cam.camera_id+'"'+(active?' class="active"':'')+' onclick="switchCamera(\''+cam.camera_id+'\',this)">'+lbl+'</button>'}c.innerHTML=html||'<span style="color:var(--muted)">Nenhuma câmera de vídeo disponível</span>'}
 function switchCamera(camId,btn){_currentCamId=camId;sendControl({camera:camId},btn,'Câmera '+camId);markActive('data-cam',camId);applyCameraCapabilities(camId)}
-function buildResolutionButtons(resolutions,currentRes){var c=document.getElementById('btngroup-resolution');if(!c)return;var filtered=filterStreamRes(resolutions);if(!filtered.length){c.innerHTML='<span style="color:var(--muted)">Nenhuma resolução disponível</span>';return}var html='';for(var i=0;i<filtered.length;i++){var r=filtered[i];var active=(r===currentRes);html+='<button data-res="'+r+'" style="white-space:pre;line-height:1.2"'+(active?' class="active"':'')+' onclick="setResolution(\''+r+'\',this)">'+resLabel(r)+'</button>'}c.innerHTML=html}
+
+// buildResolutionButtons — backend já entrega lista filtrada (máx 3 itens: 4K/1080p/720p)
+// filterStreamRes() removida: lógica de tier está no CameraCapabilitiesReader.kt
+function buildResolutionButtons(resolutions,currentRes){
+  var c=document.getElementById('btngroup-resolution');
+  if(!c)return;
+  if(!resolutions||!resolutions.length){c.innerHTML='<span style="color:var(--muted)">Nenhuma resolução disponível</span>';return;}
+  var html='';
+  for(var i=0;i<resolutions.length;i++){
+    var r=resolutions[i];
+    var active=(r===currentRes);
+    html+='<button data-res="'+r+'" style="white-space:pre;line-height:1.2"'+(active?' class="active"':'')+' onclick="setResolution(\''+r+'\',this)">'+resLabel(r)+'</button>';
+  }
+  c.innerHTML=html;
+}
+
 function buildFpsButtons(fpsRanges,currentFps){var c=document.getElementById('btngroup-fps');if(!c)return;var candidates=[15,24,30,60,120,240];var html='';for(var i=0;i<candidates.length;i++){var fps=candidates[i],supported=false;if(fpsRanges){for(var j=0;j<fpsRanges.length;j++){if(fps>=fpsRanges[j][0]&&fps<=fpsRanges[j][1]){supported=true;break}}}if(!supported)continue;var active=(fps===currentFps);html+='<button data-fps="'+fps+'"'+(active?' class="active"':'')+' onclick="setFps('+fps+',this)">'+fps+'fps</button>'}c.innerHTML=html||'<span style="color:var(--muted)">-</span>'}
 function setResolution(res,btn){sendControl({resolution:res},btn,res);markActive('data-res',res)}
 function setFps(fps,btn){sendControl({fps:fps},btn,fps+'fps');markActive('data-fps',fps)}
@@ -180,7 +200,29 @@ function downloadRawDng(btn){
 
 // ─────────────────────────────────────────────────────
 
-function applyCameraCapabilities(camId){var cap=getCap(camId);if(!cap)return;buildResolutionButtons(cap.available_resolutions||[],cap.current_resolution);buildFpsButtons(cap.fps_ranges||null,cap.current_fps);buildFocusModeButtons(cap.supported_af_modes||cap.af_modes||[],cap.current_af_mode);buildWBButtons(cap.supported_awb_modes||cap.awb_modes||[],cap.current_wb);updateOISCapability(cap.has_ois||false);buildOpticalZoomButtons(cap.lenses||null,cap.current_focal_length);showCard('card-postproc',cap.supports_manual_post_processing||cap.has_postproc||false);if(cap.iso_range){var minIso=cap.iso_range[0],maxIso=cap.iso_range[1];var labels=document.querySelector('#card-iso .rlabels');if(labels)labels.innerHTML='<span>'+minIso+'</span><span>'+Math.round((minIso+maxIso)/2)+'</span><span>'+maxIso+'</span>'}}
+function applyCameraCapabilities(camId){
+  var cap=getCap(camId);
+  if(!cap)return;
+  buildResolutionButtons(cap.available_resolutions||[],cap.current_resolution);
+  buildFpsButtons(cap.fps_ranges||null,cap.current_fps);
+  buildFocusModeButtons(cap.supported_af_modes||cap.af_modes||[],cap.current_af_mode);
+  buildWBButtons(cap.supported_awb_modes||cap.awb_modes||[],cap.current_wb);
+  updateOISCapability(cap.has_ois||false);
+  buildOpticalZoomButtons(cap.lenses||null,cap.current_focal_length);
+  showCard('card-postproc',cap.supports_manual_post_processing||cap.has_postproc||false);
+  // Card RAW: visível somente se o sensor suporta RAW_SENSOR
+  showCard('card-raw-capture',cap.supports_raw||false);
+  // Exibe a resolução real do ImageReader RAW_SENSOR no card
+  if(cap.raw_resolution){
+    var rl=document.getElementById('raw-res-label');
+    if(rl)rl.textContent=cap.raw_resolution;
+  }
+  if(cap.iso_range){
+    var minIso=cap.iso_range[0],maxIso=cap.iso_range[1];
+    var labels=document.querySelector('#card-iso .rlabels');
+    if(labels)labels.innerHTML='<span>'+minIso+'</span><span>'+Math.round((minIso+maxIso)/2)+'</span><span>'+maxIso+'</span>';
+  }
+}
 
 function applyAdvancedVision(s){
   var adv=s.advanced_vision||{};
@@ -234,7 +276,6 @@ function applyStatus(s){
   if(s.streaming){if(dot)dot.classList.remove('off');if(lbl)lbl.textContent='AO VIVO';}
   else{if(dot)dot.classList.add('off');if(lbl)lbl.textContent='Parado';}
   setText('lbl-cam',s.camera_id);setText('lbl-res',s.resolution);setText('lbl-br',s.bitrate_kbps);
-  // Sincroniza slider e label de bitrate com o valor real do encoder
   if(s.bitrate_kbps!=null&&s.bitrate_kbps>0){
     var brSlider=document.getElementById('bitrate');
     var brLabel=document.getElementById('br-value');
@@ -271,7 +312,6 @@ function pollStatus(){
 }
 
 document.addEventListener('DOMContentLoaded',function(){
-  // Marca slider como 'sujado pelo usuario' para nao sobrescrever enquanto ele arrasta
   var brSlider=document.getElementById('bitrate');
   if(brSlider){
     brSlider._userDirty=false;
