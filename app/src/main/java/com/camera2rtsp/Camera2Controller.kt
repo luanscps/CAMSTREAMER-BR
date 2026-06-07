@@ -18,6 +18,7 @@ import android.os.Build
 import android.os.Environment
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
 import android.view.Surface
@@ -49,6 +50,7 @@ class Camera2Controller {
     var focusDistance    = 0f
     var zoomLevel        = 0f
     var lanternEnabled   = false
+    // OIS: controlado tanto pelo painel web quanto pelo operador fisico (toggle local)
     var oisEnabled       = false
     var eisEnabled       = false
     var aeLocked         = false
@@ -78,7 +80,7 @@ class Camera2Controller {
     private var rawFrameCallback: ((RawCaptureManager.RawFrame) -> Unit)? = null
 
     // fix: thread dedicada EXCLUSIVAMENTE para o ImageReader de captura RAW
-    // separada do rawReaderHandler para evitar deadlock com onCaptureCompleted
+    // separada do rawImageHandler para evitar deadlock com onCaptureCompleted
     private val rawReaderThread = HandlerThread("RawReaderThread").also { it.start() }
     private val rawReaderHandler = Handler(rawReaderThread.looper)
 
@@ -87,7 +89,7 @@ class Camera2Controller {
     private val rawImageThread = HandlerThread("RawImageThread").also { it.start() }
     private val rawImageHandler = Handler(rawImageThread.looper)
 
-    // fix: AtomicReference para sincronização real entre onCaptureCompleted e onImageAvailable
+    // fix: AtomicReference para sincronizacao real entre onCaptureCompleted e onImageAvailable
     private val pendingCaptureResultRef = java.util.concurrent.atomic.AtomicReference<TotalCaptureResult?>(null)
 
     @Volatile var lastRawDngBytes: ByteArray? = null
@@ -115,8 +117,12 @@ class Camera2Controller {
     private fun post(block: () -> Unit) =
         worker.post { runCatching(block).onFailure { Log.e(tag, "worker error", it) } }
 
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private fun postMain(block: () -> Unit) =
+        mainHandler.post { runCatching(block).onFailure { Log.e(tag, "mainHandler error", it) } }
+
     // -------------------------------------------------------------------------
-    // Reflexão: campos do Camera2Base / Camera2ApiManager
+    // Reflexao: campos do Camera2Base / Camera2ApiManager
     // -------------------------------------------------------------------------
 
     private val reflField_cameraManager: java.lang.reflect.Field? by lazy {
@@ -201,7 +207,7 @@ class Camera2Controller {
         }
         val session = getCaptureSession(cam2mgr)
         if (session == null) {
-            Log.w(tag, "[liveMonitor] sessão ainda não aberta - reagendando em 500ms")
+            Log.w(tag, "[liveMonitor] sessao ainda nao aberta - reagendando em 500ms")
             worker.postDelayed({ initLiveMonitor() }, 500L)
             return
         }
@@ -265,6 +271,17 @@ class Camera2Controller {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Helper: converte qualquer valor JSON para Boolean de forma segura
+    // (evita ClassCastException quando JSON envia 1/0 ou "true"/"false")
+    // -------------------------------------------------------------------------
+    private fun anyToBoolean(value: Any?): Boolean = when (value) {
+        is Boolean -> value
+        is Number  -> value.toInt() != 0
+        is String  -> value.equals("true", ignoreCase = true) || value == "1"
+        else       -> false
+    }
+
     fun enableYuvProcessor(width: Int = currentWidth, height: Int = currentHeight, callback: ((YuvFrame) -> Unit)? = null): Boolean {
         val ctx = appContext ?: return false
         val caps = CameraCapabilitiesReader.read(ctx, currentCameraId) ?: return false
@@ -291,28 +308,16 @@ class Camera2Controller {
     }
 
     // -------------------------------------------------------------------------
-    // RAW Capture — sessão dedicada: stop stream → abre câmera → captura → resume
-    //
-    // O Android Camera2 não permite adicionar surfaces a uma CameraCaptureSession
-    // já aberta. A única abordagem correta é:
-    //   1. Parar o stream (libera a sessão do RootEncoder)
-    //   2. Abrir o CameraDevice diretamente via CameraManager
-    //   3. Criar sessão com apenas rawImageReader.surface
-    //   4. Disparar TEMPLATE_STILL_CAPTURE one-shot
-    //   5. Fechar sessão e device RAW
-    //   6. Retomar o stream
+    // RAW Capture — sessao dedicada: stop stream -> abre camera -> captura -> resume
     // -------------------------------------------------------------------------
 
-    /**
-     * Ponto de entrada: valida suporte RAW e despacha no worker thread.
-     */
     fun captureRawStill(context: Context) {
         val ctx = appContext ?: context
 
-        // fix: verificar permissão CAMERA antes de tentar abrir a câmera
+        // fix: verificar permissao CAMERA antes de tentar abrir a camera
         if (ctx.checkSelfPermission(android.Manifest.permission.CAMERA)
                 != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            Log.e(tag, "captureRawStill: permissão CAMERA negada — abortando")
+            Log.e(tag, "captureRawStill: permissao CAMERA negada — abortando")
             return
         }
 
@@ -329,14 +334,14 @@ class Camera2Controller {
             return
         }
 
-        // fix: se rawSize for null, abortar em vez de usar resolução de vídeo inválida
+        // fix: se rawSize for null, abortar em vez de usar resolucao de video invalida
         val rawSize = characteristics
             .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
             ?.getOutputSizes(ImageFormat.RAW_SENSOR)
             ?.maxByOrNull { it.width * it.height }
 
         if (rawSize == null) {
-            Log.e(tag, "captureRawStill: getOutputSizes(RAW_SENSOR) retornou null — câmera não suporta RAW_SENSOR, abortando")
+            Log.e(tag, "captureRawStill: getOutputSizes(RAW_SENSOR) retornou null — abortando")
             return
         }
 
@@ -346,10 +351,6 @@ class Camera2Controller {
         post { dispatchRawCapture(ctx, mgrSvc, characteristics, rw, rh) }
     }
 
-    /**
-     * Executa a captura RAW com sessão dedicada.
-     * Roda no worker thread.
-     */
     @SuppressLint("MissingPermission")
     private fun dispatchRawCapture(
         ctx: Context,
@@ -358,7 +359,6 @@ class Camera2Controller {
         rw: Int,
         rh: Int
     ) {
-        // fix: sempre recria o rawManager para garantir estado limpo a cada captura
         releaseRawManager()
         val captureLatch = java.util.concurrent.CountDownLatch(1)
 
@@ -372,19 +372,18 @@ class Camera2Controller {
                     appContext?.let { saveToMediaStore(it, frame.dngBytes, fn) }
                     Log.i(tag, "onRawFrame: DNG pronto — ${frame.dngBytes.size / 1024} KB, arquivo=$fn")
                 } else {
-                    Log.w(tag, "onRawFrame: dngBytes vazio, captura ignorada")
+                    Log.w(tag, "onRawFrame: dngBytes vazio")
                 }
                 rawFrameCallback?.invoke(frame)
-                // fix: countDown AQUI — somente após DNG gerado pelo RawCaptureManager
+                // fix: countDown AQUI — somente apos DNG gerado, nao no onImageAvailable
                 captureLatch.countDown()
             }
         )
 
-        // --- 1. Para o stream para liberar a sessão do RootEncoder ---
         val wasStreaming = rtmpCamera?.isStreaming == true
         val svc = StreamingService.instance
         if (wasStreaming) {
-            Log.i(tag, "dispatchRawCapture: pausando stream para captura RAW")
+            Log.i(tag, "dispatchRawCapture: pausando stream")
             svc?.stopStream()
             val stopLatch = java.util.concurrent.CountDownLatch(1)
             worker.postDelayed({ stopLatch.countDown() }, 600)
@@ -396,70 +395,50 @@ class Camera2Controller {
         var rawSession: CameraCaptureSession? = null
 
         try {
-            // --- 2. Abre o CameraDevice diretamente ---
             val openLatch = java.util.concurrent.CountDownLatch(1)
             cameraManager.openCamera(
                 currentCameraId,
                 object : CameraDevice.StateCallback() {
-                    override fun onOpened(device: CameraDevice) {
-                        rawDevice = device
-                        openLatch.countDown()
-                    }
-                    override fun onDisconnected(device: CameraDevice) {
-                        device.close()
-                        openLatch.countDown()
-                    }
+                    override fun onOpened(device: CameraDevice) { rawDevice = device; openLatch.countDown() }
+                    override fun onDisconnected(device: CameraDevice) { device.close(); openLatch.countDown() }
                     override fun onError(device: CameraDevice, error: Int) {
-                        device.close()
-                        openLatch.countDown()
+                        device.close(); openLatch.countDown()
                         Log.e(tag, "dispatchRawCapture: openCamera error=$error")
                     }
                 },
-                // fix: usa rawImageHandler (thread separada) para o StateCallback da câmera
                 rawImageHandler
             )
             if (!openLatch.await(4, java.util.concurrent.TimeUnit.SECONDS) || rawDevice == null) {
-                Log.e(tag, "dispatchRawCapture: openCamera timeout ou falhou")
-                captureLatch.countDown()
-                return
+                Log.e(tag, "dispatchRawCapture: openCamera timeout"); captureLatch.countDown(); return
             }
 
-            // --- 3. Cria sessão com apenas a surface RAW ---
             val sessionLatch = java.util.concurrent.CountDownLatch(1)
             rawDevice!!.createCaptureSession(
                 listOf(rawReader.surface),
                 object : CameraCaptureSession.StateCallback() {
-                    override fun onConfigured(session: CameraCaptureSession) {
-                        rawSession = session
-                        sessionLatch.countDown()
-                    }
+                    override fun onConfigured(session: CameraCaptureSession) { rawSession = session; sessionLatch.countDown() }
                     override fun onConfigureFailed(session: CameraCaptureSession) {
-                        Log.e(tag, "dispatchRawCapture: createCaptureSession onConfigureFailed")
-                        sessionLatch.countDown()
+                        Log.e(tag, "dispatchRawCapture: onConfigureFailed"); sessionLatch.countDown()
                     }
                 },
                 rawImageHandler
             )
             if (!sessionLatch.await(4, java.util.concurrent.TimeUnit.SECONDS) || rawSession == null) {
-                Log.e(tag, "dispatchRawCapture: createCaptureSession timeout ou falhou")
-                captureLatch.countDown()
-                return
+                Log.e(tag, "dispatchRawCapture: createCaptureSession timeout"); captureLatch.countDown(); return
             }
 
-            // --- 4. Dispara one-shot STILL_CAPTURE ---
             pendingCaptureResultRef.set(null)
 
-            // fix: onImageAvailable usa rawReaderHandler (thread exclusiva do ImageReader)
-            // evita que o busy-wait bloqueie o rawImageHandler usado pelo onCaptureCompleted
+            // fix: onImageAvailable usa rawReaderHandler (thread exclusiva)
+            // nao bloqueia o rawImageHandler usado pelo onCaptureCompleted
             rawReader.setOnImageAvailableListener({ imageReader ->
                 val image = imageReader.acquireNextImage() ?: run {
-                    Log.w(tag, "onImageAvailable: acquireNextImage retornou null")
+                    Log.w(tag, "onImageAvailable: acquireNextImage null")
                     captureLatch.countDown()
                     return@setOnImageAvailableListener
                 }
-                // fix: Image NÃO é fechada aqui — RawCaptureManager.processImage()
-                // fecha no finally do rawHandler.post{} após DngCreator terminar.
-                // captureLatch.countDown() também ocorre lá via onRawFrame callback.
+                // fix: Image NAO e fechada aqui — RawCaptureManager fecha no finally
+                // apos DngCreator terminar. captureLatch.countDown() ocorre via onRawFrame.
                 val deadline = System.currentTimeMillis() + 3000L
                 var result: TotalCaptureResult? = null
                 while (result == null && System.currentTimeMillis() < deadline) {
@@ -470,7 +449,7 @@ class Camera2Controller {
                     Log.d(tag, "onImageAvailable: processando DNG ${rw}x${rh}")
                     rawManager?.processImage(image, result)
                 } else {
-                    Log.w(tag, "onImageAvailable: TotalCaptureResult timeout (3s) — descartando frame")
+                    Log.w(tag, "onImageAvailable: TotalCaptureResult timeout — descartando")
                     runCatching { image.close() }
                     captureLatch.countDown()
                 }
@@ -478,29 +457,16 @@ class Camera2Controller {
 
             val stillBuilder = rawDevice!!.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
             stillBuilder.addTarget(rawReader.surface)
-            stillBuilder.set(
-                CaptureRequest.CONTROL_CAPTURE_INTENT,
-                CameraMetadata.CONTROL_CAPTURE_INTENT_STILL_CAPTURE
-            )
+            stillBuilder.set(CaptureRequest.CONTROL_CAPTURE_INTENT, CameraMetadata.CONTROL_CAPTURE_INTENT_STILL_CAPTURE)
 
-            // fix: onCaptureCompleted usa rawImageHandler (thread separada do rawReaderHandler)
-            // evita deadlock entre o busy-wait do onImageAvailable e o set() do result
             rawSession!!.capture(
                 stillBuilder.build(),
                 object : CameraCaptureSession.CaptureCallback() {
-                    override fun onCaptureCompleted(
-                        session: CameraCaptureSession,
-                        request: CaptureRequest,
-                        result: TotalCaptureResult
-                    ) {
+                    override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
                         Log.d(tag, "dispatchRawCapture: onCaptureCompleted")
                         pendingCaptureResultRef.set(result)
                     }
-                    override fun onCaptureFailed(
-                        session: CameraCaptureSession,
-                        request: CaptureRequest,
-                        failure: android.hardware.camera2.CaptureFailure
-                    ) {
+                    override fun onCaptureFailed(session: CameraCaptureSession, request: CaptureRequest, failure: android.hardware.camera2.CaptureFailure) {
                         Log.e(tag, "dispatchRawCapture: onCaptureFailed reason=${failure.reason}")
                         captureLatch.countDown()
                     }
@@ -508,23 +474,19 @@ class Camera2Controller {
                 rawImageHandler
             )
             Log.i(tag, "dispatchRawCapture: one-shot enviado ${rw}x${rh}")
-
-            // Aguarda DNG gerado (máx 12s — inclui tempo do DngCreator ~800ms)
             captureLatch.await(12, java.util.concurrent.TimeUnit.SECONDS)
 
         } catch (e: Exception) {
             Log.e(tag, "dispatchRawCapture: falhou", e)
         } finally {
-            // --- 5. Fecha sessão e device RAW ---
             runCatching { rawSession?.close() }
             runCatching { rawDevice?.close() }
             runCatching { rawReader.close() }
             pendingCaptureResultRef.set(null)
-            Log.i(tag, "dispatchRawCapture: sessão RAW fechada")
+            Log.i(tag, "dispatchRawCapture: sessao RAW fechada")
 
-            // --- 6. Retoma o stream ---
-            // fix: reinicia preview antes de startStream() — a sessão RAW dedicada
-            // fecha o preview do RtmpCamera2; startStream() sem preview falhava silenciosamente
+            // fix: reinicia preview antes de startStream()
+            // a sessao RAW fecha o preview do RtmpCamera2
             if (wasStreaming) {
                 Thread.sleep(300)
                 Log.i(tag, "dispatchRawCapture: retomando preview + stream")
@@ -703,6 +665,7 @@ class Camera2Controller {
         }
     }
 
+    // OIS: controlavel tanto pelo painel web quanto pelo operador fisico
     private fun applyOIS(cam: RtmpCamera2, enable: Boolean) {
         post {
             runCatching {
@@ -772,33 +735,53 @@ class Camera2Controller {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Aplica bitrate e resolucao em runtime:
+    // exige stopStream + prepareVideo + startStream pois o encoder nao aceita
+    // mudancas de parametros com a sessao de encode ativa
+    // -------------------------------------------------------------------------
+    private fun applyBitrateAndResolution(cam: RtmpCamera2, newBitrate: Int, newWidth: Int, newHeight: Int, newFps: Int) {
+        val svc = StreamingService.instance ?: return
+        val wasStreaming = cam.isStreaming
+        post {
+            runCatching {
+                if (wasStreaming) svc.stopStream()
+                // Aguarda a sessao fechar completamente
+                Thread.sleep(400)
+                // prepareVideo com novos parametros
+                cam.prepareVideo(
+                    newWidth, newHeight, newFps, newBitrate * 1000,
+                    false, 0, 0, 0
+                )
+                if (wasStreaming) {
+                    Thread.sleep(200)
+                    svc.startStream()
+                }
+                Log.i(tag, "applyBitrateAndResolution: ${newWidth}x${newHeight} ${newBitrate}kbps ${newFps}fps ok")
+            }.onFailure { Log.e(tag, "applyBitrateAndResolution falhou", it) }
+        }
+    }
+
     fun updateSettings(params: Map<String, Any>) {
         val cam = rtmpCamera ?: run { Log.w(tag, "rtmpCamera nulo"); return }
 
         params["yuvCapture"]?.let { value ->
-            val enabled = when (value) {
-                is Boolean -> value
-                is Number -> value.toInt() != 0
-                else -> value.toString().equals("true", ignoreCase = true)
-            }
+            val enabled = anyToBoolean(value)
             if (enabled) enableYuvProcessor(currentWidth, currentHeight)
             else disableYuvProcessor()
             Log.d(tag, "yuvCapture -> $enabled")
         }
 
         params["depthFusion"]?.let { value ->
-            val enabled = when (value) {
-                is Boolean -> value
-                is Number -> value.toInt() != 0
-                else -> value.toString().equals("true", ignoreCase = true)
-            }
+            val enabled = anyToBoolean(value)
             if (enabled) enableDepthFusion(currentWidth, currentHeight)
             else disableDepthFusion()
             Log.d(tag, "depthFusion -> $enabled")
         }
 
-        params["manualSensor"]?.let {
-            manualSensor = it as Boolean
+        // fix: cast seguro para Boolean — JSON pode enviar true/false, 1/0 ou "true"/"false"
+        params["manualSensor"]?.let { value ->
+            manualSensor = anyToBoolean(value)
             if (manualSensor) {
                 applyManualSensor()
             } else {
@@ -835,6 +818,13 @@ class Camera2Controller {
             Log.d(tag, "shutterSpeed -> ${exposureNs}ns")
         }
 
+        // alias: shutter_speed (snake_case) aceito tambem
+        params["shutter_speed"]?.let { raw ->
+            exposureNs = parseTimeParam(raw, 33_333_333L)
+            if (manualSensor) applyManualSensor()
+            Log.d(tag, "shutter_speed -> ${exposureNs}ns")
+        }
+
         params["frameDuration"]?.let { raw ->
             frameDurationNs = parseTimeParam(raw, 33_333_333L)
             if (manualSensor) applyManualSensor()
@@ -869,8 +859,10 @@ class Camera2Controller {
             Log.d(tag, "focus norm=$norm dist=$focusDistance")
         }
 
+        // fix: cast seguro para String — evita ClassCastException se vier como outro tipo
         params["focusmode"]?.let {
-            when (it as String) {
+            val mode = it.toString()
+            when (mode) {
                 "continuous-video", "continuous-picture", "auto" -> {
                     autoFocus = true; focusDistance = 0f; applyAutoFocus(cam)
                 }
@@ -878,11 +870,11 @@ class Camera2Controller {
                     autoFocus = false
                     post {
                         runCatching { cam.disableAutoFocus() }
-                            .onFailure { Log.e(tag, "disableAutoFocus falhou", it) }
+                            .onFailure { e -> Log.e(tag, "disableAutoFocus falhou", e) }
                     }
                 }
             }
-            Log.d(tag, "focusMode -> $it")
+            Log.d(tag, "focusMode -> $mode")
         }
 
         params["afTrigger"]?.let {
@@ -929,8 +921,9 @@ class Camera2Controller {
             Log.d(tag, "opticalZoomIndex -> $idx fl=$fl")
         }
 
+        // fix: cast seguro para String
         params["wb"]?.let {
-            val mode = it as String
+            val mode = it.toString()
             whiteBalanceMode = mode
             post {
                 runCatching {
@@ -938,54 +931,59 @@ class Camera2Controller {
                         cam.enableAutoWhiteBalance(CameraMetadata.CONTROL_AWB_MODE_AUTO)
                     } else {
                         val wbConst = when (mode) {
-                            "incandescent"  -> CameraMetadata.CONTROL_AWB_MODE_INCANDESCENT
-                            "fluorescent"   -> CameraMetadata.CONTROL_AWB_MODE_FLUORESCENT
+                            "incandescent"     -> CameraMetadata.CONTROL_AWB_MODE_INCANDESCENT
+                            "fluorescent"      -> CameraMetadata.CONTROL_AWB_MODE_FLUORESCENT
                             "warm_fluorescent" -> CameraMetadata.CONTROL_AWB_MODE_WARM_FLUORESCENT
-                            "daylight"      -> CameraMetadata.CONTROL_AWB_MODE_DAYLIGHT
-                            "cloudy"        -> CameraMetadata.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT
-                            "twilight"      -> CameraMetadata.CONTROL_AWB_MODE_TWILIGHT
-                            "shade"         -> CameraMetadata.CONTROL_AWB_MODE_SHADE
-                            else            -> CameraMetadata.CONTROL_AWB_MODE_AUTO
+                            "daylight"         -> CameraMetadata.CONTROL_AWB_MODE_DAYLIGHT
+                            "cloudy"           -> CameraMetadata.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT
+                            "twilight"         -> CameraMetadata.CONTROL_AWB_MODE_TWILIGHT
+                            "shade"            -> CameraMetadata.CONTROL_AWB_MODE_SHADE
+                            else               -> CameraMetadata.CONTROL_AWB_MODE_AUTO
                         }
                         cam.enableAutoWhiteBalance(wbConst)
                     }
-                }.onFailure { Log.e(tag, "wb falhou", it) }
+                }.onFailure { e -> Log.e(tag, "wb falhou", e) }
                 Log.d(tag, "wb -> $mode")
             }
         }
 
+        // fix: cast seguro para Boolean (OIS disponivel no painel web E para o operador fisico)
         params["ois"]?.let {
-            oisEnabled = it as Boolean
+            oisEnabled = anyToBoolean(it)
             applyOIS(cam, oisEnabled)
         }
 
+        // fix: cast seguro para Boolean
         params["eis"]?.let {
-            eisEnabled = it as Boolean
+            eisEnabled = anyToBoolean(it)
             applyEIS(cam, eisEnabled)
         }
 
+        // fix: cast seguro para Boolean
         params["aeLock"]?.let {
-            aeLocked = it as Boolean
+            aeLocked = anyToBoolean(it)
             applyAELock(cam, aeLocked)
         }
 
+        // fix: cast seguro para Boolean
         params["awbLock"]?.let {
-            awbLocked = it as Boolean
+            awbLocked = anyToBoolean(it)
             applyAWBLock(cam, awbLocked)
         }
 
+        // fix: cast seguro para Boolean
         params["torch"]?.let {
-            lanternEnabled = it as Boolean
+            lanternEnabled = anyToBoolean(it)
             applyTorch(cam, lanternEnabled)
         }
 
         params["flashMode"]?.let {
-            flashMode = it as String
+            flashMode = it.toString()
             applyFlashMode(cam, flashMode)
         }
 
         params["edge"]?.let {
-            edgeMode = when (it as String) {
+            edgeMode = when (it.toString()) {
                 "off"          -> CameraMetadata.EDGE_MODE_OFF
                 "fast"         -> CameraMetadata.EDGE_MODE_FAST
                 "high_quality" -> CameraMetadata.EDGE_MODE_HIGH_QUALITY
@@ -995,7 +993,7 @@ class Camera2Controller {
         }
 
         params["nr"]?.let {
-            noiseReductionMode = when (it as String) {
+            noiseReductionMode = when (it.toString()) {
                 "off"          -> CameraMetadata.NOISE_REDUCTION_MODE_OFF
                 "minimal"      -> CameraMetadata.NOISE_REDUCTION_MODE_MINIMAL
                 "fast"         -> CameraMetadata.NOISE_REDUCTION_MODE_FAST
@@ -1006,7 +1004,7 @@ class Camera2Controller {
         }
 
         params["hotPixel"]?.let {
-            hotPixelMode = when (it as String) {
+            hotPixelMode = when (it.toString()) {
                 "off"          -> CameraMetadata.HOT_PIXEL_MODE_OFF
                 "fast"         -> CameraMetadata.HOT_PIXEL_MODE_FAST
                 "high_quality" -> CameraMetadata.HOT_PIXEL_MODE_HIGH_QUALITY
@@ -1015,8 +1013,9 @@ class Camera2Controller {
             schedulePostProcessing()
         }
 
+        // fix: cast seguro para Boolean
         params["rggbEnabled"]?.let {
-            rggbEnabled = it as Boolean
+            rggbEnabled = anyToBoolean(it)
             if (!rggbEnabled) {
                 rggbGains = floatArrayOf(1f, 1f, 1f, 1f)
                 post {
@@ -1040,33 +1039,98 @@ class Camera2Controller {
             applyRggbGains(cam)
         }
 
-        params["camera"]?.let { camIdAny ->
-            val newCamId = camIdAny.toString()
-            if (newCamId != currentCameraId) {
-                currentCameraId = newCamId
-                releaseRawManager()
-                val facing = if (newCamId == "1") CameraHelper.Facing.FRONT else CameraHelper.Facing.BACK
-                post {
-                    runCatching {
-                        StreamingService.instance?.switchCamera(newCamId, facing)
-                    }.onFailure { Log.e(tag, "camera switch falhou", it) }
-                    Log.d(tag, "camera -> $newCamId facing=$facing")
+        // fix: bitrate — handler ausente corrigido, aplica via stopStream+prepareVideo+startStream
+        var newBitrate = currentBitrate
+        var newWidth = currentWidth
+        var newHeight = currentHeight
+        var newFps = currentFps
+        var videoParamsChanged = false
+
+        params["bitrate"]?.let {
+            val kb = when (it) {
+                is Double -> it.toInt()
+                is Int    -> it
+                is Number -> it.toInt()
+                else      -> it.toString().toIntOrNull() ?: currentBitrate
+            }
+            if (kb != currentBitrate) {
+                newBitrate = kb
+                currentBitrate = kb
+                videoParamsChanged = true
+            }
+            Log.d(tag, "bitrate -> ${kb}kbps")
+        }
+
+        // fix: resolucao — handler ausente corrigido
+        // aceita "1920x1080" ou campos separados width/height
+        params["resolution"]?.let { raw ->
+            val str = raw.toString()
+            val parts = str.split("x", ignoreCase = true)
+            if (parts.size == 2) {
+                val w = parts[0].trim().toIntOrNull()
+                val h = parts[1].trim().toIntOrNull()
+                if (w != null && h != null && (w != currentWidth || h != currentHeight)) {
+                    newWidth = w; newHeight = h
+                    currentWidth = w; currentHeight = h
+                    videoParamsChanged = true
+                    Log.d(tag, "resolution -> ${w}x${h}")
                 }
             }
         }
 
-        params["camera_id"]?.let { camIdAny ->
-            val newCamId = camIdAny.toString()
-            if (newCamId != currentCameraId) {
-                currentCameraId = newCamId
-                releaseRawManager()
-                val facing = if (newCamId == "1") CameraHelper.Facing.FRONT else CameraHelper.Facing.BACK
-                post {
-                    runCatching {
-                        StreamingService.instance?.switchCamera(newCamId, facing)
-                    }.onFailure { Log.e(tag, "camera_id switch falhou", it) }
-                    Log.d(tag, "camera_id -> $newCamId facing=$facing")
-                }
+        params["width"]?.let {
+            val w = when (it) {
+                is Double -> it.toInt()
+                is Int    -> it
+                is Number -> it.toInt()
+                else      -> it.toString().toIntOrNull() ?: currentWidth
+            }
+            if (w != currentWidth) { newWidth = w; currentWidth = w; videoParamsChanged = true }
+            Log.d(tag, "width -> $w")
+        }
+
+        params["height"]?.let {
+            val h = when (it) {
+                is Double -> it.toInt()
+                is Int    -> it
+                is Number -> it.toInt()
+                else      -> it.toString().toIntOrNull() ?: currentHeight
+            }
+            if (h != currentHeight) { newHeight = h; currentHeight = h; videoParamsChanged = true }
+            Log.d(tag, "height -> $h")
+        }
+
+        params["fps"]?.let {
+            val f = when (it) {
+                is Double -> it.toInt()
+                is Int    -> it
+                is Number -> it.toInt()
+                else      -> it.toString().toIntOrNull() ?: currentFps
+            }
+            if (f != currentFps) { newFps = f; currentFps = f; videoParamsChanged = true }
+            Log.d(tag, "fps -> $f")
+        }
+
+        if (videoParamsChanged) {
+            applyBitrateAndResolution(cam, newBitrate, newWidth, newHeight, newFps)
+        }
+
+        // fix: troca de camera despachada no mainLooper
+        // Camera2ApiManager.switchCamera() requer a thread principal
+        val newCamIdFromCamera    = params["camera"]?.toString()
+        val newCamIdFromCameraId  = params["camera_id"]?.toString()
+        val newCamId = newCamIdFromCamera ?: newCamIdFromCameraId
+
+        if (newCamId != null && newCamId != currentCameraId) {
+            currentCameraId = newCamId
+            releaseRawManager()
+            val facing = if (newCamId == "1") CameraHelper.Facing.FRONT else CameraHelper.Facing.BACK
+            // fix: postMain em vez de post — switchCamera precisa do mainLooper
+            postMain {
+                runCatching {
+                    StreamingService.instance?.switchCamera(newCamId, facing)
+                }.onFailure { Log.e(tag, "camera switch falhou", it) }
+                Log.d(tag, "camera switch -> $newCamId facing=$facing")
             }
         }
     }
@@ -1106,7 +1170,6 @@ class Camera2Controller {
         releaseDepthProcessor()
         runCatching { workerThread.quitSafely() }
         runCatching { rawReaderThread.quitSafely() }
-        // fix: para a thread dedicada ao ImageReader RAW
         runCatching { rawImageThread.quitSafely() }
     }
 }
