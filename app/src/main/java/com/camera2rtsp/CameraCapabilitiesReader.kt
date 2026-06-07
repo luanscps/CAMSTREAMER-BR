@@ -235,7 +235,7 @@ object CameraCapabilitiesReader {
         CameraMetadata.CONTROL_AWB_MODE_DAYLIGHT         -> "daylight"
         CameraMetadata.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT  -> "cloudy"
         CameraMetadata.CONTROL_AWB_MODE_TWILIGHT         -> "twilight"
-        CameraMetamer.CONTROL_AWB_MODE_SHADE            -> "shade"
+        CameraMetadata.CONTROL_AWB_MODE_SHADE            -> "shade"
         else -> "auto"
     }
 
