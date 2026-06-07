@@ -75,7 +75,6 @@ function setHotPx(val,btn){sendControl({hotPixel:val},btn,'HotPx: '+val);markAct
 function applyQualityMax(btn){setEdge('high_quality',null);setNR('high_quality',null);setHotPx('high_quality',null);feedback(btn,true);showToast('Qualidade Máxima',false)}
 function applyLatencyMin(btn){setEdge('fast',null);setNR('minimal',null);setHotPx('fast',null);feedback(btn,true);showToast('Latência Mínima',false)}
 function toggleYuv(el){sendControl({yuvCapture:el.checked},null,el.checked?'YUV ON':'YUV OFF')}
-function toggleRaw(el){sendControl({rawCapture:el.checked},null,el.checked?'RAW ON':'RAW OFF')}
 function toggleDepth(el){sendControl({depthFusion:el.checked},null,el.checked?'Depth ON':'Depth OFF')}
 
 // ─────────────────────────────────────────────────────
@@ -200,7 +199,6 @@ function applyAdvancedVision(s){
   var rawFilename=(adv.raw_filename!==undefined)?adv.raw_filename:'';
 
   setToggleChecked('toggle-yuv',yuv);
-  setToggleChecked('toggle-raw',raw);
   setToggleChecked('toggle-depth',depth);
   setBadge('badge-yuv',!!yuv);
   setBadge('badge-raw',!!raw);
