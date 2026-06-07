@@ -11,6 +11,7 @@ import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
+import android.media.Image
 import android.os.Build
 import android.os.Environment
 import android.os.Handler
@@ -315,16 +316,18 @@ class Camera2Controller {
 
         // Registra o ImageReader RAW na lib — ela fecha/reabre a câmera
         // incluindo essa surface na nova CameraCaptureSession.
+        // Camera2ApiManager.ImageCallback é interface Java: precisa ser
+        // passada explicitamente para evitar erro de inferência de tipo.
         runCatching {
             cam2.addImageListener(
                 width, height,
                 ImageFormat.RAW_SENSOR,
                 /* maxImages = */ 2,
-                /* autoClose = */ false
-            ) { image ->
-                // Caminho legado: Image chegou via repeating, busca result da fila
-                rawManager?.onImageAvailable(image)
-            }
+                /* autoClose = */ false,
+                Camera2ApiManager.ImageCallback { image: Image ->
+                    rawManager?.onImageAvailable(image)
+                }
+            )
             Log.i(tag, "enableRawCapture: addImageListener ok ${width}x${height}")
         }.onFailure {
             Log.e(tag, "enableRawCapture: addImageListener falhou", it)
