@@ -138,6 +138,209 @@ git checkout v5-CAMUI
 
 ---
 
+## Como o streaming funciona
+
+Este app **publica** vídeo para um destino **RTMP**. Isso significa que ele **não é** o servidor final de distribuição: ele atua como **encoder/publicador** e precisa de um servidor ou software que **receba** a transmissão.
+
+Em outras palavras:
+
+```text
+CAMSTREAMER-BR (Android) ──RTMP publish──► Servidor RTMP (ex: MediaMTX) ──► Clientes/players
+```
+
+### O que você precisa para funcionar
+
+Você precisa de **um receptor RTMP** acessível pela rede. Exemplos:
+
+- **MediaMTX** — opção recomendada para uso local, testes e distribuição multiprotocolo.
+- **Nginx + RTMP module**.
+- **Wowza**, **Ant Media** ou outro servidor compatível com RTMP.
+
+> Sem um servidor RTMP, o app não tem para onde enviar o stream. Nesse caso, apertar “Start Stream” apenas tentará conectar à URL configurada e falhará se não houver um endpoint ouvindo.
+
+### Recomendação prática
+
+Para desenvolvimento, QA e uso em rede local, a opção mais simples é usar **MediaMTX**. Ele recebe RTMP e pode redistribuir o mesmo stream como **RTSP**, **HLS** e **WebRTC**, facilitando testes com VLC, navegador, OBS e FFplay.
+
+## Como receber com MediaMTX
+
+### 1. Suba o servidor MediaMTX
+
+**Linux/macOS**
+
+```bash
+curl -L https://github.com/bluenviron/mediamtx/releases/latest/download/mediamtx_linux_amd64.tar.gz | tar xz
+./mediamtx
+```
+
+**Windows**
+
+1. Baixe o release do MediaMTX no GitHub.
+2. Extraia o `.zip`.
+3. Execute `mediamtx.exe`.
+
+### 2. Defina a URL RTMP no app
+
+No CAMSTREAMER-BR, configure a URL no formato:
+
+```text
+rtmp://IP_DO_SERVIDOR:1935/live/stream
+```
+
+Exemplo:
+
+```text
+rtmp://192.168.1.100:1935/live/stream
+```
+
+Onde:
+
+- `192.168.1.100` = IP do computador/servidor rodando o MediaMTX
+- `1935` = porta padrão do RTMP
+- `live` = path/application
+- `stream` = nome/chave do stream
+
+### 3. Inicie a transmissão no app
+
+Depois de aplicar a URL:
+
+1. Abra o preview da câmera.
+2. Toque no botão de iniciar stream.
+3. O app vai publicar para o MediaMTX.
+
+Se a conexão estiver correta, o stream passa a ficar disponível para leitura nos protocolos abaixo.
+
+## Como consumir o stream recebido
+
+Depois que o MediaMTX receber o stream `live/stream`, você pode consumi-lo de várias formas.
+
+### RTMP
+
+```text
+rtmp://IP_DO_SERVIDOR:1935/live/stream
+```
+
+Exemplos:
+
+```bash
+ffplay rtmp://192.168.1.100:1935/live/stream
+vlc rtmp://192.168.1.100:1935/live/stream
+```
+
+### RTSP
+
+```text
+rtsp://IP_DO_SERVIDOR:8554/live/stream
+```
+
+Exemplos:
+
+```bash
+ffplay rtsp://192.168.1.100:8554/live/stream
+vlc rtsp://192.168.1.100:8554/live/stream
+```
+
+### HLS
+
+```text
+http://IP_DO_SERVIDOR:8888/live/stream
+```
+
+Exemplo:
+
+```text
+http://192.168.1.100:8888/live/stream
+```
+
+### WebRTC
+
+```text
+http://IP_DO_SERVIDOR:8889/live/stream
+```
+
+Exemplo:
+
+```text
+http://192.168.1.100:8889/live/stream
+```
+
+## Exemplos práticos de consumo
+
+### VLC
+
+Abra:
+
+- `Mídia` → `Abrir fluxo de rede`
+- Cole uma das URLs (`rtsp://...`, `rtmp://...` ou `http://...`)
+
+### FFplay
+
+```bash
+ffplay rtsp://192.168.1.100:8554/live/stream
+```
+
+ou
+
+```bash
+ffplay rtmp://192.168.1.100:1935/live/stream
+```
+
+### Navegador
+
+- Para **HLS**: `http://192.168.1.100:8888/live/stream`
+- Para **WebRTC**: `http://192.168.1.100:8889/live/stream`
+
+### OBS Studio como viewer/input
+
+No OBS, você pode adicionar uma **Fonte de Mídia** ou **VLC Video Source** apontando para:
+
+- `rtsp://192.168.1.100:8554/live/stream`
+- ou `rtmp://192.168.1.100:1935/live/stream`
+
+Isso é útil para usar o celular como câmera sem fio dentro de uma cena OBS.
+
+## Cenários de uso recomendados
+
+### Cenário 1 — Teste local simples
+
+```text
+Celular com CAMSTREAMER-BR ──► MediaMTX no PC ──► VLC / Navegador / OBS
+```
+
+### Cenário 2 — Celular como câmera para OBS
+
+```text
+Celular ──RTMP──► MediaMTX ──RTSP/RTMP──► OBS
+```
+
+Use o OBS para compor overlays, cenas, gravação local e retransmissão.
+
+### Cenário 3 — Distribuição web
+
+```text
+Celular ──RTMP──► MediaMTX ──HLS/WebRTC──► Navegadores na rede
+```
+
+## Troubleshooting de ingest RTMP
+
+### O app não conecta ao iniciar stream
+
+Verifique:
+
+- Se o MediaMTX está em execução.
+- Se a porta **1935** está aberta.
+- Se o IP configurado no app está correto.
+- Se celular e servidor estão na mesma rede.
+- Se a URL está no formato `rtmp://IP:1935/live/stream`.
+
+### O stream publica mas não abre no navegador
+
+- Teste primeiro via **RTSP** ou **RTMP** no VLC/FFplay.
+- Para browser, use **8888** para HLS e **8889** para WebRTC.
+- Confirme que o path do stream é o mesmo (`live/stream`).
+
+---
+
 ## Interface do App (v5-CAMUI)
 
 ### HUD — Heads-Up Display
